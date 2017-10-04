@@ -79,8 +79,8 @@ class Robotic_Manipulator_Naive(object):
             initial_q = self.initial_relative_angles[idx]
             l = self.link_lengthes[idx]
             q += initial_q
-            hm = np.asarray([[np.cos(q), 0, -np.sin(q), 0],
-                             [0, 1, 0, l],
+            hm = np.asarray([[np.cos(q), 0, -np.sin(q), l],
+                             [0, 1, 0, 0],
                              [np.sin(q), 0, np.cos(q), 0],
                              [0, 0, 0, 1]])
             return(hm)
@@ -101,21 +101,35 @@ class Robotic_Manipulator_Naive(object):
             new_x = np.dot(hm(q), new_x)
         return(new_x)
 
+    def loc_joints(self, qs):
+        joint_abs_locations = []
+        for idx, rel_loc in enumerate(self.joint_relative_locations):
+            tmp_loc = self.forward_kinematics(qs, rel_loc, reference_frame=idx)
+            joint_abs_locations.append(tmp_loc)
+        return(np.asarray(joint_abs_locations))
+
 
 
 
 ### test
 
-link_lengthes = [0, 10, 1, 1, 1, 1, 1]
-qs = [np.pi/6] * 6
+link_lengthes = [1, 10, 1, 1, 1, 1, 1]
 rm = Robotic_Manipulator_Naive(link_lengthes)
 
 test_x = np.asarray([0, 0, 1, 1])
 test_x = np.asarray([1, 0, 2, 1])
 
-new_x = rm.forward_kinematics(qs, test_x, reference_frame=6)
+# test with one single point
+qs = [0, 0, np.pi/6, np.pi/6, np.pi/6, np.pi/6]
+qs[0] = np.pi/6
+new_x = rm.forward_kinematics(qs, test_x, reference_frame=1)
+print new_x
 
-
+# test the position of each joint
+qs = [0] * 6
+qs[0] = np.pi / 6
+joint_locs = rm.loc_joints(qs)
+print joint_locs
 
 
 
