@@ -4,7 +4,7 @@ import pandas as pd
 
 
 class Robotic_Manipulator_Naive(object):
-    def __init__(self, link_lengthes):
+    def __init__(self, link_lengthes, initial_angles):
         """
         rotation axises and relationship between consecutive links are pre-determined and cannot be changed
         :param link_lengthes:
@@ -19,7 +19,7 @@ class Robotic_Manipulator_Naive(object):
                                                     [self.link_lengthes[6], 0, 0, 1]
                                                     ])
         self.rotation_axises = ["z", "x", "x", "z", "y", "y"]
-        self.initial_relative_angles = [0, 0, 0, 0, np.pi, 0]
+        self.initial_relative_angles = initial_angles
 
         def r10(q, idx=0):
             initial_q = self.initial_relative_angles[idx]
