@@ -1,6 +1,5 @@
 # import libraries
 import numpy as np
-import pandas as pd
 
 
 class Robotic_Manipulator_Naive(object):
@@ -108,20 +107,20 @@ class Robotic_Manipulator_Naive(object):
 
 
 
-class RobotManipulator(object):
-
-    def __init__(self, link_lengths, rotation_axises):
-        # how to represent the link and rotation angles
-        # assumption: 1.
-        self.links = link_lengths
-        self.axises = rotation_axises
-        self.num_joints = len(rotation_axises)
-        pass
-
-    def forward_kinematics(self, qs):
-        pass
-
-    def inverse_kinematics(self, ee_loc):
-        pass
+# class RobotManipulator(object):
+#
+#     def __init__(self, link_lengths, rotation_axises):
+#         # how to represent the link and rotation angles
+#         # assumption: 1.
+#         self.links = link_lengths
+#         self.axises = rotation_axises
+#         self.num_joints = len(rotation_axises)
+#         pass
+#
+#     def forward_kinematics(self, qs):
+#         pass
+#
+#     def inverse_kinematics(self, ee_loc):
+#         pass
 
 
