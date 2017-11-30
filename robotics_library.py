@@ -1,5 +1,11 @@
 # import libraries
 import numpy as np
+import keras
+from keras.models import Sequential
+from keras.layers import Dense, Activation
+from keras import regularizers
+
+import tensorflow as tf
 
 
 class Robotic_Manipulator_Naive(object):
@@ -106,21 +112,26 @@ class Robotic_Manipulator_Naive(object):
         self.joint_abs_locations = self.loc_joints(qs)
 
 
+# Q value function
+def get_q_func(units_list, common_activation_func="relu", regularization=regularizers.l2(0.01)):
+    """
+    create a neural network model based on the units_list
+    :param units_list: list of integers that specify the number of units in each layer
+        The list has to contain at least 3 items.
+    :return: a feedforward keras model object
+    """
+    input_dimension = units_list[0]
+    model = Sequential()
+    model.add(Dense(units_list[1], kernel_regularizer=regularization, input_dim=input_dimension))
+    model.add(Activation(common_activation_func))
+    for i, num_unit in enumerate(units_list[2:-1]):
+        model.add(Dense(num_unit, kernel_regularizer=regularization))
+        model.add(Activation(common_activation_func))
+    model.add(Dense(units_list[-1], kernel_regularizer=regularization))
+    model.compile(loss="mean_squared_error", optimizer="adam")
+    return(model)
 
-# class RobotManipulator(object):
-#
-#     def __init__(self, link_lengths, rotation_axises):
-#         # how to represent the link and rotation angles
-#         # assumption: 1.
-#         self.links = link_lengths
-#         self.axises = rotation_axises
-#         self.num_joints = len(rotation_axises)
-#         pass
-#
-#     def forward_kinematics(self, qs):
-#         pass
-#
-#     def inverse_kinematics(self, ee_loc):
-#         pass
+
+
 
 
