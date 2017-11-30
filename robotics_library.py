@@ -112,7 +112,7 @@ class Robotic_Manipulator_Naive(object):
         self.joint_abs_locations = self.loc_joints(qs)
 
 
-# Q value function
+# Q value function object
 def get_q_func(units_list, common_activation_func="relu", regularization=regularizers.l2(0.01)):
     """
     create a neural network model based on the units_list
@@ -130,6 +130,43 @@ def get_q_func(units_list, common_activation_func="relu", regularization=regular
     model.add(Dense(units_list[-1], kernel_regularizer=regularization))
     model.compile(loss="mean_squared_error", optimizer="adam")
     return(model)
+
+
+# Neural-fitted Q-value algorithm
+def q_algorithm(robot_ojb, q_obj, policy_obj, reward_func):
+    pass
+    """
+    # 1st: move the ball based on the q_ojbect function and policy_object function and record every trajectories
+    # each trajectory includes: [(s_t, a_t, R_t, s_t+1, a_t+1)] for t = 0 to H, different trajectories are indexed by i
+
+    # 2nd: convert the trajectories into a format that can be used to train the q_object
+    #  x_t^i = (s_t, a_t)
+    #  y_t^i = R_t +  discounting * q_object(s_t+1, a_t+1)
+    # do this for every time step in every trajectory and put them into big X and Y
+    #   where, each row of X is (s_t, a_t)
+
+    # 3rd: train q_object using the X and y as the training data
+    #   use fit or train_on_batch method of the q_obj model
+    #   update q_obj
+
+    # Repeat the above steps until q_obj converge
+    """
+
+
+
+"""
+Things to do:
+    1. Implement the policy_object or function and reward function so that new trajectories can be generated
+        a. Define the domain of the actions, how many discrete actions are available in each joint
+        b. How to define the reward function
+        c. How to determine the terminal state
+        d. Implement the greedy policy function (more efficient policy function may be required)
+
+    2. Implement the function that convert the trajectories to the training data
+
+"""
+
+
 
 
 
