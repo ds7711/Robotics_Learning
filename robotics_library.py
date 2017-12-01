@@ -1,5 +1,6 @@
 # import libraries
 import numpy as np
+import itertools
 import keras
 from keras.models import Sequential
 from keras.layers import Dense, Activation
@@ -8,8 +9,28 @@ from keras import regularizers
 import tensorflow as tf
 
 
+# some constants
+num_joints = 6
+acceleration_resolution = 2 * np.pi / 360.0 # smallest acceleration one could apply at one time step
+
+
+# for visualization purpose only, to delete
+acceleration_resolution = 1e-3
+# for visualization purpose only, to delete
+
+
+# the first 6 lists specifying the action space of the joints, the last one specifies the action for end-effector, 0=hold, 1=release
+# in the first test, the first 4 joints should only have 0 actions
+action_spaces = [[1 * acceleration_resolution, 0, -1 * acceleration_resolution]] * num_joints + [[0, 1]]
+action_combinations = np.asarray(list(itertools.product(*action_spaces))) # enumerate all possible actions available
+
+
+
 class Robotic_Manipulator_Naive(object):
-    def __init__(self, link_lengthes, initial_angles):
+
+    def __init__(self, link_lengthes, initial_angles,
+                 intial_angular_velocities=np.zeros(num_joints) # initial angular velocities of the robots
+                 ):
         """
         rotation axises and relationship between consecutive links are pre-determined and cannot be changed
         :param link_lengthes:
@@ -24,10 +45,15 @@ class Robotic_Manipulator_Naive(object):
                                                     [self.link_lengthes[6], 0, 0, 1]
                                                     ])
         self.rotation_axises = ["z", "x", "x", "z", "y", "y"]
-        self.initial_relative_angles = initial_angles
+        self.joint_angles = initial_angles
+        self.angular_velocities = intial_angular_velocities
+        self.release = False
+        self.num_joints = len(initial_angles)
+        self.rotation_limit = None # to add the maximum achieve joint angles
 
+        # a list of homogeneous transformation matrix functions
         def r10(q, idx=0):
-            initial_q = self.initial_relative_angles[idx]
+            initial_q = self.joint_angles[idx]
             l = self.link_lengthes[idx]
             q += initial_q
             hm = np.asarray([[np.cos(q), -np.sin(q), 0, 0],
@@ -37,7 +63,7 @@ class Robotic_Manipulator_Naive(object):
             return (hm)
 
         def r21(q, idx=1):
-            initial_q = self.initial_relative_angles[idx]
+            initial_q = self.joint_angles[idx]
             l = self.link_lengthes[idx]
             q += initial_q
             hm = np.asarray([[1, 0, 0, 0],
@@ -47,7 +73,7 @@ class Robotic_Manipulator_Naive(object):
             return (hm)
 
         def r32(q, idx=2):
-            initial_q = self.initial_relative_angles[idx]
+            initial_q = self.joint_angles[idx]
             l = self.link_lengthes[idx]
             q += initial_q
             hm = np.asarray([[1, 0, 0, 0],
@@ -57,7 +83,7 @@ class Robotic_Manipulator_Naive(object):
             return (hm)
 
         def r43(q, idx=3):
-            initial_q = self.initial_relative_angles[idx]
+            initial_q = self.joint_angles[idx]
             l = self.link_lengthes[idx]
             q += initial_q
             hm = np.asarray([[np.cos(q), -np.sin(q), 0, 0],
@@ -67,7 +93,7 @@ class Robotic_Manipulator_Naive(object):
             return (hm)
 
         def r54(q, idx=4):
-            initial_q = self.initial_relative_angles[idx]
+            initial_q = self.joint_angles[idx]
             l = self.link_lengthes[idx]
             q += initial_q
             hm = np.asarray([[np.cos(q), 0, -np.sin(q), 0],
@@ -77,7 +103,7 @@ class Robotic_Manipulator_Naive(object):
             return (hm)
 
         def r65(q, idx=5):
-            initial_q = self.initial_relative_angles[idx]
+            initial_q = self.joint_angles[idx]
             l = self.link_lengthes[idx]
             q += initial_q
             hm = np.asarray([[np.cos(q), 0, -np.sin(q), l],
@@ -90,6 +116,13 @@ class Robotic_Manipulator_Naive(object):
         self.joint_abs_locations = self.loc_joints(qs=[0] * len(self.rotation_axises))
 
     def forward_kinematics(self, qs, x, reference_frame=6):
+        """
+        convert the relative loctions in the joint frame into the world frame
+        :param qs: joint angles
+        :param x: location in the joint frame
+        :param reference_frame: frame in which the x is specified
+        :return:
+        """
         transform_list = self.ht_list[:reference_frame]
         transform_list = transform_list[::-1]
 
@@ -101,15 +134,56 @@ class Robotic_Manipulator_Naive(object):
             new_x = np.dot(hm(q), new_x)
         return (new_x)
 
-    def loc_joints(self, qs):
+    def loc_joints(self, qs=None):
+        """
+        if qs is not specified, calculate the absolute positions of the joints under the current configurations
+        :param qs:
+        :return:
+        """
+        if qs is None: # if joint angles were not specified, use the current joint angles
+            qs = self.joint_angles
         joint_abs_locations = []
         for idx, rel_loc in enumerate(self.joint_relative_locations):
             tmp_loc = self.forward_kinematics(qs, rel_loc, reference_frame=idx)
             joint_abs_locations.append(tmp_loc)
-        return (np.asarray(joint_abs_locations))
+        self.joint_abs_locations = np.asarray(joint_abs_locations)
+        return (self.joint_abs_locations)
 
     def configure_robots(self, qs):
         self.joint_abs_locations = self.loc_joints(qs)
+
+    def _update_angular_velocities(self, action):
+        self.angular_velocities += action[:num_joints]
+        self.release = action[-1]
+
+    def _update_joint_angles(self):
+        self.joint_angles += self.angular_velocities
+
+    def update_rm(self, action):
+        """
+        update the robot to the next time step
+        update the robot's joint angles based on the velocity from previous time step and \
+            angular velocity based on current action (specified as acceleration)
+        :param action: acceleration at each joint and whether to release the ball
+        :return:
+        """
+        self._update_joint_angles()
+        self._update_angular_velocities(action)
+
+    def _jacobian_matrix(self):
+        """
+        calculate the value of the Current Jacobian matrix values
+        :return:
+        """
+        pass
+
+    def cal_ee_speed(self):
+        """
+        calculate the speed of the end effector in the world frame
+        :return:
+        """
+        pass
+
 
 
 # Q value function object
