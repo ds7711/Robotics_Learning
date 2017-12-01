@@ -115,6 +115,18 @@ class Robotic_Manipulator_Naive(object):
         self.ht_list = [r10, r21, r32, r43, r54, r65]
         self.joint_abs_locations = self.loc_joints(qs=[0] * len(self.rotation_axises))
 
+    def _simple_forward_kinematics(self, qs, new_x, transform_list):
+        """
+        routine for calculating the absolute location
+        :param new_x:
+        :param transform_list:
+        :param qs:
+        :return:
+        """
+        for hm, q in zip(transform_list, qs):
+            new_x = np.dot(hm(q), new_x)
+        return (new_x)
+
     def forward_kinematics(self, qs, x, reference_frame=6):
         """
         convert the relative loctions in the joint frame into the world frame
@@ -129,9 +141,7 @@ class Robotic_Manipulator_Naive(object):
         qs = qs[:reference_frame]
         qs = qs[::-1]
 
-        new_x = x
-        for hm, q in zip(transform_list, qs):
-            new_x = np.dot(hm(q), new_x)
+        new_x = self._simple_forward_kinematics(qs, x, transform_list)
         return (new_x)
 
     def loc_joints(self, qs=None):
@@ -170,19 +180,40 @@ class Robotic_Manipulator_Naive(object):
         self._update_joint_angles()
         self._update_angular_velocities(action)
 
-    def _jacobian_matrix(self):
+
+    def _jacobian_matrix(self, x, qs=None, reference_frame=6, delta=1e-10):
         """
         calculate the value of the Current Jacobian matrix values
         :return:
         """
-        pass
+        if qs is None:
+            qs = self.joint_angles
+        new_qs = qs[:reference_frame]
+        new_qs = new_qs[::-1]
+
+        transform_list = self.ht_list[:reference_frame]
+
+        new_x = self._simple_forward_kinematics(new_qs, x, transform_list)
+
+        jacobian = []
+        delta_qs = np.zeros(len(transform_list))
+        for i in range(len(transform_list)):
+            delta_qs[i] = delta
+            tmp_qs = new_qs + delta_qs
+            tmp_x = self._simple_forward_kinematics(tmp_qs, x, transform_list)
+            tmp_jacobian = (tmp_x - new_x) / delta
+            jacobian.append(tmp_jacobian)
+        return(np.asarray(jacobian))
 
     def cal_ee_speed(self):
         """
         calculate the speed of the end effector in the world frame
         :return:
         """
-        pass
+        x = self.joint_relative_locations[-1]
+        jacobian = self._jacobian_matrix(x)
+        v_dot = np.dot(jacobian.T, self.angular_velocities)
+        return(v_dot)
 
 
 
