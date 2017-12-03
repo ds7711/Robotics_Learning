@@ -255,7 +255,13 @@ class Policy_Object(object):
         self.action_indexes = np.arange(len(action_combinations))
         self.q_obj = q_obj
 
-    def softmax_policy(self, state):
+    def softmax_policy(self, state, exploring_factor=None):
+        """
+        choose action based on the probability from softmax of the q value
+        :param state:
+        :param exploring_factor: balance exploration and exploitation
+        :return:
+        """
         self.action_combinations[:, state_dimension] = state
         est_q_values = self.q_obj.predict(ext_action_cmbs)
         exponential_values = np.exp(est_q_values)
