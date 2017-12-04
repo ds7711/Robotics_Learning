@@ -224,7 +224,8 @@ class Robotic_Manipulator_Naive(object):
         v_dot = np.dot(jacobian.T, self.angular_velocities)
         return(v_dot)
 
-
+def get_dist(pt1, pt2):
+    return np.sqrt( (pt1[0]-pt2[0])**2 + (pt1[1]-pt2[1])**2 + (pt1[2]-pt2[2])**2 );
 
 # Q value function object
 def get_q_func(units_list, common_activation_func="relu", regularization=regularizers.l2(0.01)):
@@ -281,12 +282,12 @@ class Policy_Object(object):
         pass
 
 
-def generate_state_trajectory(robotic_arm, q_obj, threshold, discounting=0.9):
+def generate_state_trajectory(robotic_arm, q_obj, alpha, discounting=0.9):
     """
     generate trajectories and training data from one trial
     :param robotic_arm:
     :param q_obj:
-    :param threshold:
+    :param alpha:
     :param discounting:
     :return:
     """
@@ -305,7 +306,7 @@ def generate_state_trajectory(robotic_arm, q_obj, threshold, discounting=0.9):
         robotic_arm.update_rm(action)
         next_state = robotic_arm.state
 
-        reward = reward_function(next_state, hoop_position, threshold)
+        reward = reward_function(robotic_arm, alpha)
 
         next_action = policy_obj.softmax_policy(next_state)
         tmp_y = reward + discounting * q_obj.predict(next_state[:-1])
@@ -319,16 +320,38 @@ def generate_state_trajectory(robotic_arm, q_obj, threshold, discounting=0.9):
     return(np.asarray(X), np.asarray(Y))
 
 
-def ball_distance(state, hoop_position):
-    pass
+class Ball(object):
+
+    def __init__(self, pos, vel, hoop_position=hoop_position):
+        self.pos = pos
+        self.vel = vel
+        self.min_dist_to_hoop = float("Inf")
+    def update(self):
+        t = 0.02 # set the time interval between two updates
+        g = -10 # gravity acceleration
+        ground = 0.01 # the ground
+        while (self.pos[2] >= ground):
+            # we assume the only acceleration caused by gravity is along z axis
+            #so only z_dot changes
+            self.vel[2] += g
+            self.pos[0] += self.vel[0]
+            self.pos[1] += self.vel[1]
+            self.pos[2] += self.vel[2]
+            temp_dist = get_dist(self.pos, hoop_position)
+            if (temp_dist < self.min_dist_to_hoop):
+                self.min_dist_to_hoop = temp_dist
 
 
-def reward_function(state, hoop_position, threshold):
-    if state[-1] == 0: # if ball was in hold, 0 reward
+def reward_function(robot_obj, alpha):
+    if robot_obj.release == False: # if ball was in hold, 0 reward
         return(0)
-    elif state[-1] == 1: # if ball was released, calculate the ball's distance to the hoop when it crosses the plane of the hoop
-        reward = float(ball_distance(state, hoop_position) < threshold)
-        return(reward)
+    elif robot_obj.release == True: # if ball was released, calculate the ball's distance to the hoop when it crosses the plane of the hoop
+        pos = robot_obj.loc_joints()[-1] # get ee position
+        vel = robot_obj.cal_ee_speed() # get ee velocity
+        ball1 = Ball(pos[:3], vel[:3])
+        ball1.update()
+        R = np.exp(-alpha * ball1.min_dist_to_hoop)
+        return()
     else:
         print("Errors in reward function!!!")
         return(None)
@@ -400,6 +423,7 @@ Things to do:
 #     probs = exponential_values / np.sum(exponential_values)
 #     action = action_combinations[np.random.choice(action_indexes, p=probs)]
 #     return(action)
+
 
 
 
