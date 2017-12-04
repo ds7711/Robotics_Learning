@@ -1,24 +1,29 @@
+
 import numpy as np
-import robotics_library as rll
-import matplotlib.pylab as plt
+from keras.models import load_model
+# import matplotlib.pyplot as plt
+import robotics_library as rbl
+
+# read the environment
+env_name = "shaping"
+model_name = env_name + ".h5"
+env_obj = rbl.env_dict[env_name]
+
+# create an initial object
+link_lengthes = [1, 3, 1, 1, 1, 1, 1]
+initial_angles = [0, 0, 0, 0, np.pi, 0]
+initial_angular_velocities = np.zeros(env_obj.num_joints)
+
+initial_rm = rbl.Robotic_Manipulator_Naive(link_lengthes, initial_angles, initial_angular_velocities)
+print(initial_rm.loc_joints())
+
+# create the hoop
+
+# initialize the q_value function object
+q_obj = rbl.get_q_func([19, 50, 20,  1])
+q_obj = load_model(model_name)
 
 
-# test the implementation of the keras model
-num_samples = 10000
-num_dim = 2
-x_scale = 10
-noise_scale = 10
-theta = np.random.randint(1, 10, size=(num_dim))
-
-x = np.random.random((num_samples, num_dim)) * x_scale
-y = np.dot(x, theta) + np.random.random(size=(num_samples)) * noise_scale
-
-labels = np.random.random(10000)
-
-nnn = rll.get_q_func([num_dim, 5, 1])
-
-nnn.fit(x, y, batch_size=100, epochs=10)
-
-y_hat = nnn.predict(x)
-
-plt.scatter(y, y_hat)
+# train the q_value function object
+q_obj, reward_list, score_list = rbl.neural_fitted_q_algorithm(initial_rm, q_obj, env_obj, num_iterations=100, model_name=model_name)
+# q_obj.save(model_name)
