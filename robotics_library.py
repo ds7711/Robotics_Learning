@@ -32,7 +32,7 @@ class Env2D(object):
     num_fixed_joints = 4
     acceleration_resolution = 2.0 * np.pi / 360.0 / 5  # smallest acceleration one could apply at one time step
     state_dimension = num_joints * 2
-    hoop_position = np.asarray([5, 3, 4]) # hoop position
+    hoop_position = np.asarray([5, 3, 2]) # hoop position
     hoop_size = 1
     action_spaces = [[0]] * num_fixed_joints + \
                     [[1 * acceleration_resolution, 0, -1 * acceleration_resolution]] * (num_joints-num_fixed_joints) + \
@@ -204,9 +204,9 @@ class Robotic_Manipulator_Naive(object):
     def _update_angular_velocities(self, action):
         self.angular_velocities += action[:-1]
         self.release = action[-1]
-        if self.time > self.max_time: # if too many time steps were executed, release the ball to stop training
-            self.release = 1
-            print("Maximum update step reached for this robot manipulator! Ball was released!!!")
+        # if self.time > self.max_time: # if too many time steps were executed, release the ball to stop training
+        #     self.release = 1
+        #     print("Maximum update step reached for this robot manipulator! Ball was released!!!")
 
     def _update_joint_angles(self):
         self.joint_angles += self.angular_velocities
@@ -405,14 +405,16 @@ def reward_function(robot_obj, alpha, env_obj):
     :param alpha:
     :return:
     """
+    reward = 0
     if robot_obj.release == False: # if ball was in hold, 0 reward
-        return(0)
+        return(reward)
     elif robot_obj.release == True: # if ball was released, calculate the ball's distance to the hoop when it crosses the plane of the hoop
         pos = robot_obj.loc_joints()[-1] # get ee position
         vel = robot_obj.cal_ee_speed() # get ee velocity
         tmp_ball = Ball(pos[:3], vel[:3], env_obj)
         tmp_ball.update()
-        reward = np.exp(-alpha * tmp_ball.min_dist_to_hoop)
+        if tmp_ball.min_dist_to_hoop < env_obj.hoop_size:
+            reward = np.exp(-alpha * tmp_ball.min_dist_to_hoop)
         return(reward)
     else:
         print("Errors in reward function!!!")
