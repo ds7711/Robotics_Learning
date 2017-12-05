@@ -24,23 +24,18 @@ print(env_obj.hoop_position)
 
 # create the hoop
 
-# pdb.set_trace()
+pdb.set_trace()
 # initialize the q_value function object
 if os.path.isfile(model_name):
     q_obj = load_model(model_name)
 else:
-    q_obj = rbl.get_q_func([19, 30, 20, 1])
-
-
+    q_obj = rbl.get_q_func([19, 50, 20, 1])
 
 
 # train the q_value function object
-positive_data = rbl.DataPool(q_obj, max_trajectories=100)
-
-env_obj.hoop_size = 4.0
+env_obj.hoop_size = 2
 print(env_obj.hoop_size)
-q_obj, reward_list, score_list = rbl.shaping_training(initial_rm, q_obj, env_obj, positive_data,
-                                                      num_iterations=50, model_name=model_name)
+q_obj, reward_list, score_list = rbl.neural_fitted_q_algorithm(initial_rm, q_obj, env_obj, num_iterations=10, model_name=model_name)
 np.savez_compressed(data_name, reward_list=reward_list,
                     score_list=score_list)
 q_obj.save(model_name)
