@@ -10,7 +10,7 @@ import pdb
 env_name = "2d"
 model_name = env_name + ".h5"
 data_name = env_name + ".npz"
-env_obj = rbl.env_dict[env_name]
+env_obj = rbl.Env2D()
 
 # create an initial object
 link_lengthes = [1, 3, 1, 1, 1, 1, 1]
@@ -29,9 +29,7 @@ print(env_obj.hoop_position)
 if os.path.isfile(model_name):
     q_obj = load_model(model_name)
 else:
-    q_obj = rbl.get_q_func([19, 30, 20, 1])
-
-
+    q_obj = rbl.get_q_func([19, 50, 20, 1])
 
 
 # train the q_value function object
@@ -40,7 +38,8 @@ positive_data = rbl.DataPool(q_obj, max_trajectories=100)
 env_obj.hoop_size = 4.0
 print(env_obj.hoop_size)
 q_obj, reward_list, score_list = rbl.shaping_training(initial_rm, q_obj, env_obj, positive_data,
-                                                      num_iterations=50, model_name=model_name)
+                                                      num_iterations=50, model_name=model_name,
+                                                      policy_type="epsilon_greedy")
 np.savez_compressed(data_name, reward_list=reward_list,
                     score_list=score_list)
 q_obj.save(model_name)

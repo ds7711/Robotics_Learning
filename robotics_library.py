@@ -2,6 +2,7 @@
 import numpy as np
 import itertools
 import keras
+import copy
 import pdb
 from keras.models import Sequential
 from keras.layers import Dense, Activation
@@ -29,21 +30,6 @@ class Env3D(object):
                                  action_combinations))  # the first 12 columns are state, used for faster computations
     action_indexes = np.arange(len(action_combinations))
 
-class Env2D(object):
-    num_joints = 6
-    num_fixed_joints = 4
-    acceleration_resolution = 2.0 * np.pi / 360.0 / 5  # smallest acceleration one could apply at one time step
-    state_dimension = num_joints * 2
-    hoop_position = np.asarray([5, 3, 2]) # hoop position
-    hoop_size = 1 # for training
-    score_threshold = 0.5 # distance smaller than this threshold was considered as in
-    action_spaces = [[0]] * num_fixed_joints + \
-                    [[1 * acceleration_resolution, 0, -1 * acceleration_resolution]] * (num_joints-num_fixed_joints) + \
-                    [[0, 1]]
-    action_combinations = np.asarray(list(itertools.product(*action_spaces)))  # enumerate all possible actions available
-    ext_action_cmbs = np.hstack((np.zeros((len(action_combinations), state_dimension)),
-                                 action_combinations))  # the first 12 columns are state, used for faster computations
-
 class shaping(object):
     num_joints = 6
     num_fixed_joints = 4
@@ -58,12 +44,39 @@ class shaping(object):
     ext_action_cmbs = np.hstack((np.zeros((len(action_combinations), state_dimension)),
                                  action_combinations))  # the first 12 columns are state, used for faster computations
 
+class Env2D(object):
 
-env_dict = {
-    "2d": Env2D,
-    "3d": Env3D,
-    "shaping": shaping
-}
+    def __init__(self, hoop_size=4, policy_greedy=1):
+        # configurations for the robotic arm
+        self.num_joints = 6
+        self.num_fixed_joints = 4
+        self.acceleration_resolution = 2.0 * np.pi / 360.0 / 5  # smallest acceleration one could apply at one time step
+        self.state_dimension = self.num_joints * 2
+
+        self.link_lengthes = [1, 3, 1, 1, 1, 1, 1]
+        self.initial_angles = [0, 0, 0, 0, -np.pi / 4, 0]
+        self.initial_angular_velocities = np.zeros(self.num_joints)
+
+        # configuration for the hoop
+        self.hoop_position = np.asarray([5, 3, 2]) # hoop position
+        self.dist_threshold = 0.7 # fixed to check the performance
+
+        # specify the action spaces
+        self.action_spaces = [[0]] * self.num_fixed_joints + \
+                        [[1 * self.acceleration_resolution, 0, -1 * self.acceleration_resolution]] * \
+                            (self.num_joints-self.num_fixed_joints) + \
+                        [[0, 1]]
+        self.action_combinations = np.asarray(list(itertools.product(*self.action_spaces)))  # enumerate all possible actions available
+        self.ext_action_cmbs = np.hstack((np.zeros((len(self.action_combinations), self.state_dimension)),
+                                     self.action_combinations))  # the first 12 columns are state, used for faster computations
+
+        # parameters used for training
+        self.hoop_size = hoop_size  # for training, decrease as training goes
+        self.policy_greedy = policy_greedy # change the steepness of the softmax function of the policy object
+        self.epsilon = 1.0 / len(self.action_combinations) # parameter for epsilon-greedy policy function
+        self.epsilon_increase = 0.25 # epsilon increase proportion when perfance reaches a threshold
+        self.alpha = 2.5 # controls the relationship between reward and distance to the hoop
+
 
 
 
@@ -71,8 +84,11 @@ class Robotic_Manipulator_Naive(object):
 
     def __init__(self, link_lengthes, initial_angles, intial_angular_velocities, max_time=1000):
         """
-        rotation axises and relationship between consecutive links are pre-determined and cannot be changed
-        :param link_lengthes:
+        create the robotic manipulator object
+        :param link_lengthes: 
+        :param initial_angles: 
+        :param intial_angular_velocities: 
+        :param max_time: 
         """
         self.link_lengthes = link_lengthes
         self.joint_relative_locations = np.asarray([[0, 0, self.link_lengthes[0], 1],
@@ -84,6 +100,7 @@ class Robotic_Manipulator_Naive(object):
                                                     [self.link_lengthes[6], 0, 0, 1]
                                                     ])
         self.rotation_axises = ["z", "x", "x", "z", "y", "y"]
+        self.initial_joint_angles = initial_angles
         self.joint_angles = initial_angles
         self.angular_velocities = intial_angular_velocities
         self.release = False
@@ -95,7 +112,7 @@ class Robotic_Manipulator_Naive(object):
 
         # a list of homogeneous transformation matrix functions
         def r10(q, idx=0):
-            initial_q = self.joint_angles[idx]
+            initial_q = self.initial_joint_angles[idx]
             l = self.link_lengthes[idx]
             q += initial_q
             hm = np.asarray([[np.cos(q), -np.sin(q), 0, 0],
@@ -105,7 +122,7 @@ class Robotic_Manipulator_Naive(object):
             return (hm)
 
         def r21(q, idx=1):
-            initial_q = self.joint_angles[idx]
+            initial_q = self.initial_joint_angles[idx]
             l = self.link_lengthes[idx]
             q += initial_q
             hm = np.asarray([[1, 0, 0, 0],
@@ -115,7 +132,7 @@ class Robotic_Manipulator_Naive(object):
             return (hm)
 
         def r32(q, idx=2):
-            initial_q = self.joint_angles[idx]
+            initial_q = self.initial_joint_angles[idx]
             l = self.link_lengthes[idx]
             q += initial_q
             hm = np.asarray([[1, 0, 0, 0],
@@ -125,7 +142,7 @@ class Robotic_Manipulator_Naive(object):
             return (hm)
 
         def r43(q, idx=3):
-            initial_q = self.joint_angles[idx]
+            initial_q = self.initial_joint_angles[idx]
             l = self.link_lengthes[idx]
             q += initial_q
             hm = np.asarray([[np.cos(q), -np.sin(q), 0, 0],
@@ -135,7 +152,7 @@ class Robotic_Manipulator_Naive(object):
             return (hm)
 
         def r54(q, idx=4):
-            initial_q = self.joint_angles[idx]
+            initial_q = self.initial_joint_angles[idx]
             l = self.link_lengthes[idx]
             q += initial_q
             hm = np.asarray([[np.cos(q), 0, -np.sin(q), 0],
@@ -145,7 +162,7 @@ class Robotic_Manipulator_Naive(object):
             return (hm)
 
         def r65(q, idx=5):
-            initial_q = self.joint_angles[idx]
+            initial_q = self.initial_joint_angles[idx]
             l = self.link_lengthes[idx]
             q += initial_q
             hm = np.asarray([[np.cos(q), 0, -np.sin(q), l],
@@ -166,7 +183,8 @@ class Robotic_Manipulator_Naive(object):
         :return:
         """
         for hm, q in zip(transform_list, qs):
-            new_x = np.dot(hm(q), new_x)
+            tmp_x = np.dot(hm(q), new_x)
+            new_x = tmp_x
         return (new_x)
 
     def forward_kinematics(self, qs, x, reference_frame=6):
@@ -202,16 +220,28 @@ class Robotic_Manipulator_Naive(object):
         return (self.joint_abs_locations)
 
     def configure_robots(self, qs):
-        self.joint_abs_locations = self.loc_joints(qs)
+        """
+        configure the robot to specified rotation angles
+        :param qs: specify the angles of each joints
+        :return: 
+        """
+        self.joint_angles = qs
+        self.joint_abs_locations = self.loc_joints(self.joint_angles)
 
     def _update_angular_velocities(self, action):
+        """
+        update the angular velocities and hold/release state
+        :param action: 
+        :return: 
+        """
         self.angular_velocities += action[:-1]
         self.release = action[-1]
-        # if self.time > self.max_time: # if too many time steps were executed, release the ball to stop training
-        #     self.release = 1
-        #     print("Maximum update step reached for this robot manipulator! Ball was released!!!")
 
     def _update_joint_angles(self):
+        """
+        update the joint angles
+        :return: 
+        """
         self.joint_angles += self.angular_velocities
 
     def update_rm(self, action):
@@ -241,6 +271,7 @@ class Robotic_Manipulator_Naive(object):
         new_qs = new_qs[::-1]
 
         transform_list = self.ht_list[:reference_frame]
+        transform_list = transform_list[::-1]
 
         new_x = self._simple_forward_kinematics(new_qs, x, transform_list)
 
@@ -271,11 +302,17 @@ def get_dist(pt1, pt2):
     :param pt2:
     :return:
     """
-    return np.sqrt( (pt1[0]-pt2[0])**2 + (pt1[1]-pt2[1])**2 + (pt1[2]-pt2[2])**2 );
+    return np.sqrt( (pt1[0]-pt2[0])**2 + (pt1[1]-pt2[1])**2 + (pt1[2]-pt2[2])**2 )
 
 class Ball(object):
 
     def __init__(self, pos, vel, env_obj):
+        """
+        initialize the ball object
+        :param pos: 
+        :param vel: 
+        :param env_obj: 
+        """
         self.pos = pos
         self.vel = vel
         self.min_dist_to_hoop = float("Inf")
@@ -285,15 +322,15 @@ class Ball(object):
         g = -10 # gravity acceleration
         ground = 0.01 # the ground
         ball_trajectory = []
-        while (self.pos[2] >= ground):
+        while (self.pos[2] > ground):
             # we assume the only acceleration caused by gravity is along z axis
             #so only z_dot changes
             ball_trajectory.append(np.copy(self.pos)) # store the trajectory of the ball
 
-            self.vel[2] += g * t
             self.pos[0] += self.vel[0] * t
             self.pos[1] += self.vel[1] * t
             self.pos[2] += self.vel[2] * t
+            self.vel[2] += g * t
 
             temp_dist = get_dist(self.pos, self.hoop_position)
             if (temp_dist < self.min_dist_to_hoop):
@@ -301,7 +338,7 @@ class Ball(object):
         return(np.asarray(ball_trajectory))
 
 
-def reward_function(robot_obj, alpha, env_obj):
+def reward_function(robot_obj, env_obj):
     """
     reward function of the task
     :param robot_obj:
@@ -309,15 +346,24 @@ def reward_function(robot_obj, alpha, env_obj):
     :return:
     """
     reward = 0
+
     if robot_obj.release == False: # if ball was in hold, 0 reward
         return(reward)
+
     elif robot_obj.release == True: # if ball was released, calculate the ball's distance to the hoop when it crosses the plane of the hoop
         pos = robot_obj.loc_joints()[-1] # get ee position
         vel = robot_obj.cal_ee_speed() # get ee velocity
         tmp_ball = Ball(pos[:3], vel[:3], env_obj)
         tmp_ball.update()
+
+        # if the ball is close to the hoop (distance closer than hoop size), return a reward
         if tmp_ball.min_dist_to_hoop < env_obj.hoop_size:
-            reward = np.exp(-alpha * tmp_ball.min_dist_to_hoop)
+            reward = np.exp(- (tmp_ball.min_dist_to_hoop * env_obj.alpha))
+            # reward = 1.0 / (1 + tmp_ball.min_dist_to_hoop)
+            if tmp_ball.min_dist_to_hoop < env_obj.dist_threshold:
+                print("Successful throw!!!", tmp_ball.min_dist_to_hoop)
+                print()
+        pdb.set_trace()
         return(reward)
     else:
         print("Errors in reward function!!!")
@@ -346,13 +392,15 @@ def get_q_func(units_list, common_activation_func="relu", regularization=regular
 
 class Policy_Object(object):
 
-    def __init__(self, q_obj, env_obj):
+    def __init__(self, q_obj, env_obj, policy_type="softmax"):
 
         self.action_combinations = env_obj.action_combinations
         self.ext_action_cmbs = env_obj.ext_action_cmbs
         self.action_indexes = np.arange(len(env_obj.action_combinations))
         self.q_obj = q_obj
-        self.env_obj = env_obj
+        self.env_obj = copy.deepcopy(env_obj)
+        self.greedy = self.env_obj.policy_greedy
+        self.policy_type = policy_type
 
     def softmax_policy(self, state):
         """
@@ -363,12 +411,12 @@ class Policy_Object(object):
         """
         self.ext_action_cmbs[:, :self.env_obj.state_dimension] = state
         est_q_values = self.q_obj.predict(self.env_obj.ext_action_cmbs)
-        exponential_values = np.exp(est_q_values)
+        exponential_values = np.exp(est_q_values * self.greedy)
         probs = exponential_values / np.sum(exponential_values)
         action = self.env_obj.action_combinations[np.random.choice(self.action_indexes, p=np.squeeze(probs))]
         return(action)
 
-    def epsilon_greedy_policy(state, q_obj, epsilon=0.8):
+    def epsilon_greedy_policy(self, state):
         """
         return the selected action based on the epsilon greedy
         :param state:
@@ -377,12 +425,111 @@ class Policy_Object(object):
         :param action_combinations:
         :return:
         """
-        pass
+        self.ext_action_cmbs[:, :self.env_obj.state_dimension] = state
+        est_q_values = self.q_obj.predict(self.env_obj.ext_action_cmbs)
+        if np.random.rand() < self.env_obj.epsilon:
+            act_idx = np.argmax(est_q_values)
+            return(self.env_obj.action_combinations[act_idx])
+        else:
+            act_idx = np.random.choice(self.action_indexes)
+            return (self.env_obj.action_combinations[act_idx])
+
+    def select_action(self, state):
+        if self.policy_type == "softmax":
+            action = self.softmax_policy(state)
+        elif self.policy_type == "epsilon_greedy":
+            action = self.epsilon_greedy_policy(state)
+        else:
+            print("Errors in policy type of the reward function!!!")
+        return(action)
+
+
+def test_q_function(ini_robot_obj, q_obj, env_obj_old, num_test=100, policy_type="epsilon_greedy"):
+    """
+    test the performance of the policy based on the learned q function
+    :param robotic_arm: 
+    :param q_obj: 
+    :param reward_function: 
+    :param alpha: 
+    :param env_obj: 
+    :return: 
+    """
+
+    env_obj = copy.deepcopy(env_obj_old)
+    env_obj.epsilon = 0.95
+    env_obj.hoop_size = 3
+    env_obj.alpha = 2.5
+
+    score_threshold = np.exp(-env_obj.alpha * env_obj.dist_threshold) # convert the hoop size to reward threshold to test whether the ball is in
+    # 1st step: initialize the policy object basedon the current q function
+
+    policy_obj = Policy_Object(q_obj, env_obj, policy_type=policy_type)
+
+    ee_trajectory_list = []
+    ee_final_pos_list = []
+    ee_speed_list = []
+    sum_reward_list = []
+    score_list = []
+    for _ in range(num_test):
+        link_lengthes = ini_robot_obj.link_lengthes
+        initial_angles = ini_robot_obj.joint_angles
+        initial_angular_velocities = ini_robot_obj.angular_velocities
+        robotic_arm = Robotic_Manipulator_Naive(link_lengthes, initial_angles,
+                                                initial_angular_velocities)
+        # get the robot's initial state
+        state = robotic_arm.state
+        # select the 1st action based on the policy object
+        action = policy_obj.select_action(state[:-1])
+
+        # initialize the state and action list
+        state_list = []
+        action_list = []
+        reward_list = []
+        ee_pos_list = [robotic_arm.loc_joints()[-1]]
+
+        # reward list
+        while not robotic_arm.release: # if the ball was not released in the last time step, execute the following
+            # get the first x: state-action pair
+            state_list.append(np.copy(state))
+            action_list.append(np.copy(action))
+
+            # update the robot based on the previous selected action
+            robotic_arm.update_rm(action)
+            # store the robot's next state
+            next_state = robotic_arm.state
+            ee_pos_list.append(np.copy(robotic_arm.loc_joints()[-1]))
+            if robotic_arm.release == 1:
+                ee_speed = robotic_arm.cal_ee_speed()
+            # calculate the reward obtained from the next state
+            reward = reward_function(robotic_arm, env_obj)
+            reward_list.append(reward)
+            # obtain the action after next state
+            next_action = policy_obj.select_action(next_state[:-1])
+            # next_q = q_obj.predict(np.concatenate((next_state[:-1], next_action))[np.newaxis, :])[0, 0]
+            # q_val_list.append(next_q)
+
+            state = next_state
+            action = next_action
+
+        state_list.append(state)
+        action_list.append(action)
+        score = float(reward_list[-1] > score_threshold)
+        reward_sum = np.sum(reward_list)
+
+        # add to the test list
+        ee_trajectory_list.append(ee_pos_list)
+        ee_final_pos_list.append(ee_pos_list[-1])
+        ee_speed_list.append(ee_speed)
+        sum_reward_list.append(reward_sum)
+        score_list.append(score)
+
+    return(ee_trajectory_list, ee_final_pos_list, ee_speed_list,
+           sum_reward_list, score_list)
 
 
 
-
-def generate_state_trajectory(robotic_arm, q_obj, reward_function, alpha, env_obj):
+def generate_state_trajectory(robotic_arm, q_obj, reward_func, env_obj,
+                              policy_type="epsilon_greedy"):
     """
     generate trajectories and training data from one trial
     :param robotic_arm:
@@ -392,15 +539,16 @@ def generate_state_trajectory(robotic_arm, q_obj, reward_function, alpha, env_ob
     :return:
     """
     # reward_threshold
-    score_threshold = np.exp(-alpha * env_obj.score_threshold) # convert the hoop size to reward threshold to test whether the ball is in
+    alpha = env_obj.alpha
+    score_threshold = np.exp(-alpha * env_obj.dist_threshold) # convert the hoop size to reward threshold to test whether the ball is in
 
     # 1st step: initialize the policy object basedon the current q function
-    policy_obj = Policy_Object(q_obj, env_obj)
+    policy_obj = Policy_Object(q_obj, env_obj, policy_type=policy_type)
 
     # get the robot's initial state
     state = robotic_arm.state
     # select the 1st action based on the policy object
-    action = policy_obj.softmax_policy(state[:-1])
+    action = policy_obj.select_action(state[:-1])
 
     # initialize the state and action list
     state_list = []
@@ -419,10 +567,10 @@ def generate_state_trajectory(robotic_arm, q_obj, reward_function, alpha, env_ob
         # store the robot's next state
         next_state = robotic_arm.state
         # calculate the reward obtained from the next state
-        reward = reward_function(robotic_arm, alpha, env_obj)
+        reward = reward_func(robotic_arm, env_obj)
         reward_list.append(reward)
         # obtain the action after next state
-        next_action = policy_obj.softmax_policy(next_state[:-1])
+        next_action = policy_obj.select_action(next_state[:-1])
         # next_q = q_obj.predict(np.concatenate((next_state[:-1], next_action))[np.newaxis, :])[0, 0]
         # q_val_list.append(next_q)
 
@@ -432,7 +580,9 @@ def generate_state_trajectory(robotic_arm, q_obj, reward_function, alpha, env_ob
     state_list.append(state)
     action_list.append(action)
     score = float(reward_list[-1] > score_threshold)
-    reward = reward_function(robotic_arm, alpha, env_obj)
+    if score > 0.1:
+        print("Score added!")
+    reward = reward_func(robotic_arm, env_obj)
     return(np.asarray(state_list), np.asarray(action_list), np.asarray(reward_list), reward, score)
 
 
@@ -447,8 +597,8 @@ def trajectory2data(state_list, action_list, reward_list, q_object, discounting_
 
 # Neural-fitted Q-value algorithm
 def neural_fitted_q_algorithm(ini_robot_obj, q_obj, env_obj, data_pool, reward_func=reward_function,
-                              num_iterations=3, minimum_samples=200, minimum_trj=3, verbose=0,
-                              model_name="bk_model.h5"):
+                              num_iterations=5, minimum_samples=200, minimum_trj=5, verbose=0,
+                              model_name="bk_model.h5", policy_type="epsilon_greedy"):
     """
     # 1st: move the ball based on the q_ojbect function and policy_object function and record every trajectories
     # each trajectory includes: [(s_t, a_t, R_t, s_t+1, a_t+1)] for t = 0 to H, different trajectories are indexed by i
@@ -482,7 +632,8 @@ def neural_fitted_q_algorithm(ini_robot_obj, q_obj, env_obj, data_pool, reward_f
             robot_obj = Robotic_Manipulator_Naive(link_lengthes, initial_angles, initial_angular_velocities)
             state_list, action_list, reward_list, reward, score = generate_state_trajectory(robot_obj, q_obj,
                                                                                             reward_func,
-                                                                                            alpha=1, env_obj=env_obj)
+                                                                                            env_obj=env_obj,
+                                                                                            policy_type=policy_type)
             X, Y = trajectory2data(state_list, action_list, reward_list, q_obj)
             # print X.shape, Y.shape
             # # print X, Y
@@ -494,6 +645,7 @@ def neural_fitted_q_algorithm(ini_robot_obj, q_obj, env_obj, data_pool, reward_f
             final_reward_list.append(reward)
             if len(reward_list) > 4 and np.mean(reward_list) > 0:
                 print(reward_list)
+                print(env_obj.hoop_size)
 
             num_trajectories += 1
             data_pool.add(state_list, action_list, reward_list, q_obj)
@@ -502,7 +654,7 @@ def neural_fitted_q_algorithm(ini_robot_obj, q_obj, env_obj, data_pool, reward_f
 
         # 2nd step: train the q_object
         q_obj.fit(X_train, Y_train, batch_size=minimum_samples,
-                  epochs=len(X_list) / minimum_samples * minimum_trj, verbose=verbose)
+                  epochs=len(X_train) / minimum_samples * minimum_trj, verbose=verbose)
 
     q_obj.save(model_name)
     return(q_obj, final_reward_list, score_list)
@@ -538,92 +690,40 @@ class DataPool(object):
                 self.rewards[min_idx] = reward_list[-1]
 
 
+
 def shaping_training(ini_robot_obj, q_obj, env_obj, data_pool, shaping_factor=1.4, reward_func=reward_function,
                      num_iterations=3, minimum_samples=200, minimum_trj=5, verbose=0,
-                     model_name="bk_model.h5"):
-    old_avg_reward = 0
-    iii = 0
-    while env_obj.hoop_size > env_obj.score_threshold:
+                     model_name="bk_model.h5", policy_type="softmax"):
+
+    iii = 1
+    _, _, _, reward, score = test_q_function(ini_robot_obj, q_obj, env_obj)
+    max_score = 0
+    while np.mean(score) < 0.1:
         new_q_obj, reward_list, score_list = neural_fitted_q_algorithm(ini_robot_obj, q_obj, env_obj, data_pool,
                                                                    reward_func=reward_func,
                                                                    num_iterations=num_iterations, minimum_samples=minimum_samples,
                                                                    minimum_trj=minimum_trj, verbose=verbose,
-                                                                   model_name=model_name)
-        q_obj = new_q_obj
-        new_avg_reward = np.mean(reward_list)
-
-        if old_avg_reward < new_avg_reward:
-            env_obj.hoop_size /= shaping_factor
-            old_avg_reward = new_avg_reward
-
+                                                                   model_name=model_name, policy_type=policy_type)
+        _, _, _, reward, score = test_q_function(ini_robot_obj, new_q_obj, env_obj)
+        if np.mean(reward) > max_score:
+            max_score = np.mean(score)
+            env_obj.hoop_size = env_obj.hoop_size / shaping_factor
+            # env_obj.policy_greedy += shaping_factor
+            env_obj.epsilon += env_obj.epsilon_increase * (1 - env_obj.epsilon)
+            # env_obj.epsilon = env_obj.epsilon ** 3
 
         print("-------------------------------------------------------------------------")
-        print(iii, new_avg_reward, env_obj.hoop_size)
+        print(iii, np.mean(reward), np.mean(score), env_obj.hoop_size, env_obj.epsilon, env_obj.policy_greedy)
         print("-------------------------------------------------------------------------")
+
+        q_obj = new_q_obj # update to new q_object
         iii += 1
-        if iii > 3:
+        if iii % 5 == 0:
             pdb.set_trace()
 
+    print("Training successfully completed!")
+    return(q_obj, reward_list, score_list)
 
-
-
-
-
-
-# def generate_robot_trajectory(robotic_arm, q_obj, reward_function, alpha, env_obj, discounting=0.9):
-#     """
-#     generate the trajectories from one trial
-#     :param robotic_arm:
-#     :param q_obj:
-#     :param reward_function:
-#     :param alpha:
-#     :param env_obj:
-#     :param discounting:
-#     :return:
-#     """
-#     reward_threshold = np.exp(-alpha * env_obj.hoop_size)  # convert the hoop size to reward threshold to test whether the ball is in
-#
-#     # 1st step: initialize the policy object basedon the current q function
-#     policy_obj = Policy_Object(q_obj, env_obj)
-#     X = []
-#     Y = []
-#
-#     # get the robot's initial state
-#     state = robotic_arm.state
-#     # select the 1st action based on the policy object
-#     action = policy_obj.softmax_policy(state[:-1])
-#
-#     # initialize the state and action list
-#     state_list = [state]
-#     action_list = [action]
-#
-#     # reward list
-#     while not robotic_arm.release:  # if the ball was not released in the last time step, execute the following
-#         # get the first x: state-action pair
-#         tmp_x = np.concatenate((state[:-1], action))
-#         X.append(tmp_x)
-#
-#         # update the robot based on the previous selected action
-#         robotic_arm.update_rm(action)
-#         # store the robot's next state
-#         next_state = robotic_arm.state
-#         # calculate the reward obtained from the next state
-#         reward = reward_function(robotic_arm, alpha, env_obj)
-#         if reward > 0:
-#             print(reward)
-#         # obtain the action after next state
-#         next_action = policy_obj.softmax_policy(next_state[:-1])
-#         next_q = q_obj.predict(np.concatenate((next_state[:-1], next_action))[np.newaxis, :])[0, 0]
-#         tmp_y = reward + discounting * next_q
-#         Y.append(tmp_y)
-#
-#         state = next_state
-#         action = next_action
-#         state_list.append(state)
-#         action_list.append(action)
-#     score = float(reward > reward_threshold)
-#     reward = reward_function(robotic_arm, alpha, env_obj)
-#     return (np.asarray(X), np.asarray(Y), reward, score)
 
 
 
