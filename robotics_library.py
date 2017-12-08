@@ -282,24 +282,26 @@ class Robotic_Manipulator_Naive(object):
 
         new_x = self._simple_forward_kinematics(new_qs, x, transform_list)
 
-        jacobian = []
-        delta_qs = np.zeros(len(transform_list))
-        for i in range(len(transform_list)):
+        jacobian = np.zeros((4, self.num_joints))
+        for i in range(self.num_joints):
+            delta_qs = np.zeros(len(transform_list))
             delta_qs[i] = delta
             tmp_qs = new_qs + delta_qs
             tmp_x = self._simple_forward_kinematics(tmp_qs, x, transform_list)
             tmp_jacobian = (tmp_x - new_x) / delta
-            jacobian.append(tmp_jacobian)
-        return(np.asarray(jacobian))
+            jacobian[:, self.num_joints-i-1] = tmp_jacobian
+            # jacobian.append(tmp_jacobian)
+        return(jacobian)
 
     def cal_ee_speed(self):
         """
         calculate the speed of the end effector in the world frame
         :return:
         """
+        # pdb.set_trace()
         x = self.joint_relative_locations[-1]
         jacobian = self._jacobian_matrix(x)
-        v_dot = np.dot(jacobian.T, self.angular_velocities)
+        v_dot = np.dot(jacobian, self.angular_velocities)
         return(v_dot)
 
 def get_dist(pt1, pt2):
@@ -734,7 +736,7 @@ def shaping_training(q_obj, env_obj, data_pool, shaping_factor=1.4, reward_func=
         q_obj = new_q_obj # update to new q_object
         iii += 1
         if iii % 2 == 0:
-            # pdb.set_trace()
+            pdb.set_trace()
             pass
 
     print("Training successfully completed!")
