@@ -63,9 +63,14 @@ class Env2D(object):
 
         # specify the action spaces
         self.action_spaces = [[0]] * self.num_fixed_joints + \
-                        [[1 * self.acceleration_resolution, 0, -1 * self.acceleration_resolution]] * \
-                            (self.num_joints-self.num_fixed_joints) + \
-                        [[0, 1]]
+                             [list(np.asarray([75, 10, 3, 1, 0, -1, -3, -10, -75]) * self.acceleration_resolution)] * \
+                             (self.num_joints-self.num_fixed_joints) + \
+                             [[0, 1]]
+        # self.action_spaces = [[0]] * self.num_fixed_joints + \
+        #                      [list(np.arange(-10, 11, 5) * self.acceleration_resolution)] * \
+        #                      (self.num_joints-self.num_fixed_joints) + \
+        #                      [[0, 1]]
+        # pdb.set_trace()
         self.action_combinations = np.asarray(list(itertools.product(*self.action_spaces)))  # enumerate all possible actions available
         self.ext_action_cmbs = np.hstack((np.zeros((len(self.action_combinations), self.state_dimension)),
                                      self.action_combinations))  # the first 12 columns are state, used for faster computations
@@ -74,7 +79,7 @@ class Env2D(object):
         self.hoop_size = hoop_size  # for training, decrease as training goes
         self.policy_greedy = policy_greedy # change the steepness of the softmax function of the policy object
         self.epsilon = 1.0 / len(self.action_combinations) # parameter for epsilon-greedy policy function
-        self.epsilon = 0.5
+        self.epsilon = 0.75
         self.epsilon_increase = 0.25 # epsilon increase proportion when perfance reaches a threshold
         self.alpha = 1 # controls the relationship between reward and distance to the hoop
         self.max_reward = 100
@@ -481,6 +486,7 @@ def test_q_function(q_obj, env_obj_old, num_test=100, policy_type="epsilon_greed
         # get the robot's initial state
         state = robotic_arm.state
         # select the 1st action based on the policy object
+        # pdb.set_trace()
         action = policy_obj.select_action(state[:-1])
 
         # initialize the state and action list
@@ -661,10 +667,9 @@ def neural_fitted_q_algorithm(q_obj, env_obj, data_pool, reward_func=reward_func
         Y_train = np.concatenate(Y_list + data_pool.Y_list)
 
         # 2nd step: train the q_object
-        q_obj.fit(X_train, Y_train, batch_size=5 * minimum_trj,
-                  epochs=len(X_train) / minimum_trj * 5, verbose=verbose)
-
-    q_obj.save(model_name)
+        q_obj.fit(X_train, Y_train, batch_size=len(X_train) / minimum_trj,
+                  epochs=minimum_trj * 5, verbose=verbose)
+        q_obj.save(model_name)
     return(q_obj, final_reward_list, score_list)
 
 
@@ -729,7 +734,7 @@ def shaping_training(q_obj, env_obj, data_pool, shaping_factor=1.4, reward_func=
         q_obj = new_q_obj # update to new q_object
         iii += 1
         if iii % 2 == 0:
-            pdb.set_trace()
+            # pdb.set_trace()
             pass
 
     print("Training successfully completed!")
