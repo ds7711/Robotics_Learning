@@ -59,7 +59,7 @@ class Env2D(object):
 
         # configuration for the hoop
         self.hoop_position = np.asarray([5, 3, 2]) # hoop position
-        self.dist_threshold = 0.7 # fixed to check the performance
+        self.dist_threshold = 0.85 # fixed to check the performance
 
         # specify the action spaces
         self.action_spaces = [[0]] * self.num_fixed_joints + \
@@ -74,8 +74,10 @@ class Env2D(object):
         self.hoop_size = hoop_size  # for training, decrease as training goes
         self.policy_greedy = policy_greedy # change the steepness of the softmax function of the policy object
         self.epsilon = 1.0 / len(self.action_combinations) # parameter for epsilon-greedy policy function
+        self.epsilon = 0.5
         self.epsilon_increase = 0.25 # epsilon increase proportion when perfance reaches a threshold
-        self.alpha = 2.5 # controls the relationship between reward and distance to the hoop
+        self.alpha = 1 # controls the relationship between reward and distance to the hoop
+        self.max_reward = 100
 
 
 
@@ -358,12 +360,13 @@ def reward_function(robot_obj, env_obj):
 
         # if the ball is close to the hoop (distance closer than hoop size), return a reward
         if tmp_ball.min_dist_to_hoop < env_obj.hoop_size:
-            reward = np.exp(- (tmp_ball.min_dist_to_hoop * env_obj.alpha))
+            reward = np.exp(- (tmp_ball.min_dist_to_hoop * env_obj.alpha)) * env_obj.max_reward
             # reward = 1.0 / (1 + tmp_ball.min_dist_to_hoop)
             if tmp_ball.min_dist_to_hoop < env_obj.dist_threshold:
                 print("Successful throw!!!", tmp_ball.min_dist_to_hoop)
                 print()
-        pdb.set_trace()
+                # pdb.set_trace()
+        # pdb.set_trace()
         return(reward)
     else:
         print("Errors in reward function!!!")
@@ -444,7 +447,7 @@ class Policy_Object(object):
         return(action)
 
 
-def test_q_function(ini_robot_obj, q_obj, env_obj_old, num_test=100, policy_type="epsilon_greedy"):
+def test_q_function(q_obj, env_obj_old, num_test=100, policy_type="epsilon_greedy"):
     """
     test the performance of the policy based on the learned q function
     :param robotic_arm: 
@@ -454,13 +457,12 @@ def test_q_function(ini_robot_obj, q_obj, env_obj_old, num_test=100, policy_type
     :param env_obj: 
     :return: 
     """
-
     env_obj = copy.deepcopy(env_obj_old)
     env_obj.epsilon = 0.95
     env_obj.hoop_size = 3
     env_obj.alpha = 2.5
 
-    score_threshold = np.exp(-env_obj.alpha * env_obj.dist_threshold) # convert the hoop size to reward threshold to test whether the ball is in
+    score_threshold = np.exp(-env_obj.alpha * env_obj.dist_threshold) * env_obj.max_reward # convert the hoop size to reward threshold to test whether the ball is in
     # 1st step: initialize the policy object basedon the current q function
 
     policy_obj = Policy_Object(q_obj, env_obj, policy_type=policy_type)
@@ -471,9 +473,9 @@ def test_q_function(ini_robot_obj, q_obj, env_obj_old, num_test=100, policy_type
     sum_reward_list = []
     score_list = []
     for _ in range(num_test):
-        link_lengthes = ini_robot_obj.link_lengthes
-        initial_angles = ini_robot_obj.joint_angles
-        initial_angular_velocities = ini_robot_obj.angular_velocities
+        link_lengthes = np.copy(env_obj.link_lengthes)
+        initial_angles = np.copy(env_obj.initial_angles)
+        initial_angular_velocities = np.copy(env_obj.initial_angular_velocities)
         robotic_arm = Robotic_Manipulator_Naive(link_lengthes, initial_angles,
                                                 initial_angular_velocities)
         # get the robot's initial state
@@ -528,7 +530,7 @@ def test_q_function(ini_robot_obj, q_obj, env_obj_old, num_test=100, policy_type
 
 
 
-def generate_state_trajectory(robotic_arm, q_obj, reward_func, env_obj,
+def generate_state_trajectory(q_obj, reward_func, env_obj,
                               policy_type="epsilon_greedy"):
     """
     generate trajectories and training data from one trial
@@ -538,9 +540,14 @@ def generate_state_trajectory(robotic_arm, q_obj, reward_func, env_obj,
     :param discounting:
     :return:
     """
+    link_lengthes = np.copy(env_obj.link_lengthes)
+    initial_angles = np.copy(env_obj.initial_angles)
+    initial_angular_velocities = np.copy(env_obj.initial_angular_velocities)
+    robotic_arm = Robotic_Manipulator_Naive(link_lengthes, initial_angles, initial_angular_velocities)
+
     # reward_threshold
     alpha = env_obj.alpha
-    score_threshold = np.exp(-alpha * env_obj.dist_threshold) # convert the hoop size to reward threshold to test whether the ball is in
+    score_threshold = env_obj.max_reward * np.exp(-alpha * env_obj.dist_threshold) # convert the hoop size to reward threshold to test whether the ball is in
 
     # 1st step: initialize the policy object basedon the current q function
     policy_obj = Policy_Object(q_obj, env_obj, policy_type=policy_type)
@@ -583,6 +590,8 @@ def generate_state_trajectory(robotic_arm, q_obj, reward_func, env_obj,
     if score > 0.1:
         print("Score added!")
     reward = reward_func(robotic_arm, env_obj)
+    # pdb.set_trace()
+    # print "hello"
     return(np.asarray(state_list), np.asarray(action_list), np.asarray(reward_list), reward, score)
 
 
@@ -590,13 +599,15 @@ def trajectory2data(state_list, action_list, reward_list, q_object, discounting_
     # print(state_list.shape, action_list.shape)
     all_states = np.hstack((state_list[:, :-1], action_list))
     X = all_states[:-1, :]
-    Y = reward_list + discounting_factor * np.squeeze(q_object.predict(all_states[1:, :]))
+    q_values = np.squeeze(q_object.predict(all_states[1:, :]))
+    q_values[-1] = 0
+    Y = reward_list + discounting_factor * q_values
     # print X.shape, Y.shape
     return(X, Y)
 
 
 # Neural-fitted Q-value algorithm
-def neural_fitted_q_algorithm(ini_robot_obj, q_obj, env_obj, data_pool, reward_func=reward_function,
+def neural_fitted_q_algorithm(q_obj, env_obj, data_pool, reward_func=reward_function,
                               num_iterations=5, minimum_samples=200, minimum_trj=5, verbose=0,
                               model_name="bk_model.h5", policy_type="epsilon_greedy"):
     """
@@ -616,9 +627,6 @@ def neural_fitted_q_algorithm(ini_robot_obj, q_obj, env_obj, data_pool, reward_f
     # Repeat the above steps until q_obj converge
     """
     # get the initial parameters of the robot
-    link_lengthes = ini_robot_obj.link_lengthes
-    initial_angles = ini_robot_obj.joint_angles
-    initial_angular_velocities = ini_robot_obj.angular_velocities
 
     for iii in range(num_iterations):
 
@@ -629,32 +637,32 @@ def neural_fitted_q_algorithm(ini_robot_obj, q_obj, env_obj, data_pool, reward_f
         final_reward_list = []
         num_trajectories = 0
         while len(X_list) < minimum_samples or num_trajectories < minimum_trj:
-            robot_obj = Robotic_Manipulator_Naive(link_lengthes, initial_angles, initial_angular_velocities)
-            state_list, action_list, reward_list, reward, score = generate_state_trajectory(robot_obj, q_obj,
+            state_list, action_list, reward_list, reward, score = generate_state_trajectory(q_obj,
                                                                                             reward_func,
-                                                                                            env_obj=env_obj,
+                                                                                            env_obj=copy.deepcopy(env_obj),
                                                                                             policy_type=policy_type)
-            X, Y = trajectory2data(state_list, action_list, reward_list, q_obj)
-            # print X.shape, Y.shape
-            # # print X, Y
-            # print(len(X_list), len(Y_list))
-            X_list.append(X)
-            Y_list.append(Y)
-            # X, Y, reward, score = generate_state_trajectory(robot_obj, q_obj, reward_func, alpha=1, env_obj=env_obj)
-            score_list.append(score)
-            final_reward_list.append(reward)
-            if len(reward_list) > 4 and np.mean(reward_list) > 0:
-                print(reward_list)
-                print(env_obj.hoop_size)
+            if len(state_list) > 2: # at least two actions have to be made to be considered as a valid trajectory
+                X, Y = trajectory2data(state_list, action_list, reward_list, q_obj)
+                # print X.shape, Y.shape
+                # # print X, Y
+                # print(len(X_list), len(Y_list))
+                X_list.append(X)
+                Y_list.append(Y)
+                # X, Y, reward, score = generate_state_trajectory(robot_obj, q_obj, reward_func, alpha=1, env_obj=env_obj)
+                score_list.append(score)
+                final_reward_list.append(reward)
+                if len(reward_list) > 4 and reward > 0:
+                    print(reward_list)
+                    print(env_obj.hoop_size)
 
-            num_trajectories += 1
-            data_pool.add(state_list, action_list, reward_list, q_obj)
+                num_trajectories += 1
+                data_pool.add(state_list, action_list, reward_list, q_obj)
         X_train = np.vstack(X_list + data_pool.X_list)
         Y_train = np.concatenate(Y_list + data_pool.Y_list)
 
         # 2nd step: train the q_object
-        q_obj.fit(X_train, Y_train, batch_size=minimum_samples,
-                  epochs=len(X_train) / minimum_samples * minimum_trj, verbose=verbose)
+        q_obj.fit(X_train, Y_train, batch_size=5 * minimum_trj,
+                  epochs=len(X_train) / minimum_trj * 5, verbose=verbose)
 
     q_obj.save(model_name)
     return(q_obj, final_reward_list, score_list)
@@ -669,7 +677,7 @@ class DataPool(object):
         self.X_list = []
         self.Y_list = []
         self.rewards = []
-        self.minimum_rewards = -np.inf
+        self.minimum_rewards = 1e-10
         self.max_trajectories = max_trajectories
         self.num_trajectories = 0
         self.q_obj = q_obj
@@ -677,6 +685,7 @@ class DataPool(object):
 
     def add(self, state_list, action_list, reward_list, q_obj, discounting_factor=0.95):
         if reward_list[-1] > self.minimum_rewards:
+            # pdb.set_trace()
             X, Y = trajectory2data(state_list, action_list, reward_list, q_obj, discounting_factor=discounting_factor)
             if self.num_trajectories < self.max_trajectories:
                 self.X_list.append(X)
@@ -684,6 +693,7 @@ class DataPool(object):
                 self.rewards.append(reward_list[-1])
                 self.num_trajectories += 1
             else:
+                # pdb.set_trace()
                 min_idx = np.argmin(self.rewards)
                 self.X_list[min_idx] = X
                 self.Y_list[min_idx] = Y
@@ -691,25 +701,25 @@ class DataPool(object):
 
 
 
-def shaping_training(ini_robot_obj, q_obj, env_obj, data_pool, shaping_factor=1.4, reward_func=reward_function,
-                     num_iterations=3, minimum_samples=200, minimum_trj=5, verbose=0,
+def shaping_training(q_obj, env_obj, data_pool, shaping_factor=1.4, reward_func=reward_function,
+                     num_iterations=3, minimum_samples=200, minimum_trj=10, verbose=0,
                      model_name="bk_model.h5", policy_type="softmax"):
 
     iii = 1
-    _, _, _, reward, score = test_q_function(ini_robot_obj, q_obj, env_obj)
+    _, _, _, reward, score = test_q_function(q_obj, env_obj)
     max_score = 0
     while np.mean(score) < 0.1:
-        new_q_obj, reward_list, score_list = neural_fitted_q_algorithm(ini_robot_obj, q_obj, env_obj, data_pool,
-                                                                   reward_func=reward_func,
-                                                                   num_iterations=num_iterations, minimum_samples=minimum_samples,
-                                                                   minimum_trj=minimum_trj, verbose=verbose,
-                                                                   model_name=model_name, policy_type=policy_type)
-        _, _, _, reward, score = test_q_function(ini_robot_obj, new_q_obj, env_obj)
+        new_q_obj, reward_list, score_list = neural_fitted_q_algorithm(q_obj, env_obj, data_pool,
+                                                                       reward_func=reward_func,
+                                                                       num_iterations=num_iterations, minimum_samples=minimum_samples,
+                                                                       minimum_trj=minimum_trj, verbose=verbose,
+                                                                       model_name=model_name, policy_type=policy_type)
+        _, _, _, reward, score = test_q_function(new_q_obj, env_obj)
         if np.mean(reward) > max_score:
             max_score = np.mean(score)
             env_obj.hoop_size = env_obj.hoop_size / shaping_factor
             # env_obj.policy_greedy += shaping_factor
-            env_obj.epsilon += env_obj.epsilon_increase * (1 - env_obj.epsilon)
+            # env_obj.epsilon += env_obj.epsilon_increase * (1 - env_obj.epsilon)
             # env_obj.epsilon = env_obj.epsilon ** 3
 
         print("-------------------------------------------------------------------------")
@@ -718,8 +728,9 @@ def shaping_training(ini_robot_obj, q_obj, env_obj, data_pool, shaping_factor=1.
 
         q_obj = new_q_obj # update to new q_object
         iii += 1
-        if iii % 5 == 0:
+        if iii % 2 == 0:
             pdb.set_trace()
+            pass
 
     print("Training successfully completed!")
     return(q_obj, reward_list, score_list)
