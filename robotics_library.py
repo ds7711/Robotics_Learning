@@ -63,7 +63,7 @@ class Env2D(object):
 
         # specify the action spaces
         self.action_spaces = [[0]] * self.num_fixed_joints + \
-                             [list(np.asarray([75, 10, 3, 1, 0, -1, -3, -10, -75]) * self.acceleration_resolution)] * \
+                             [list(np.asarray([25, 10, 3, 1, 0, -1, -3, -10, -25]) * self.acceleration_resolution)] * \
                              (self.num_joints-self.num_fixed_joints) + \
                              [[0, 1]]
         # self.action_spaces = [[0]] * self.num_fixed_joints + \
