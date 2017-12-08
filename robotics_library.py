@@ -53,7 +53,7 @@ class Env2D(object):
         self.acceleration_resolution = 2.0 * np.pi / 360.0 / 5  # smallest acceleration one could apply at one time step
         self.state_dimension = self.num_joints * 2
 
-        self.link_lengthes = [1, 3, 1, 1, 1, 1, 1]
+        self.link_lengthes = [1, 3, 1, 1, 1, 1, 2]
         self.initial_angles = [0, 0, 0, 0, -np.pi / 4, 0]
         self.initial_angular_velocities = np.zeros(self.num_joints)
 
@@ -90,6 +90,8 @@ class Env2D(object):
 
 class Robotic_Manipulator_Naive(object):
 
+    # to add time resolution into the manipulator
+
     def __init__(self, link_lengthes, initial_angles, intial_angular_velocities, max_time=1000):
         """
         create the robotic manipulator object
@@ -108,17 +110,17 @@ class Robotic_Manipulator_Naive(object):
                                                     [self.link_lengthes[6], 0, 0, 1]
                                                     ])
         self.rotation_axises = ["z", "x", "x", "z", "y", "y"]
-        self.initial_joint_angles = initial_angles
-        self.joint_angles = initial_angles
-        self.angular_velocities = intial_angular_velocities
+        self.initial_joint_angles = np.asarray(initial_angles, dtype=np.double)
+        self.joint_angles = np.asarray(initial_angles, dtype=np.double)
+        self.angular_velocities = np.asarray(intial_angular_velocities, dtype=np.double)
         self.release = False
         self.num_joints = len(initial_angles)
         self.rotation_limit = None # to add the maximum achieve joint angles
         self.state = np.concatenate((self.joint_angles, self.angular_velocities, [self.release]))
         self.time = 0
         self.max_time = max_time
-        self.joint_angle_limit = np.pi / 2
-        self.joint_vel_limit = 2 * np.pi / 360.0 * 20.0
+        self.joint_angle_limit = np.pi / 2 * 10
+        self.joint_vel_limit = 2 * np.pi / 360.0 * 20.0 * 20
 
         # a list of homogeneous transformation matrix functions
         def r10(q, idx=0):
@@ -267,6 +269,7 @@ class Robotic_Manipulator_Naive(object):
         :return:
         """
         self._update_joint_angles()
+        # pdb.set_trace()
         self._update_angular_velocities(action)
         self.state[:self.num_joints] = self.joint_angles
         self.state[self.num_joints:-1] = self.angular_velocities

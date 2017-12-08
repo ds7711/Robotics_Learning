@@ -31,7 +31,7 @@ if os.path.isfile(model_name):
 else:
     q_obj = rbl.get_q_func([19, 50, 20, 1])
 
-# q_obj = rbl.get_q_func([19, 30, 15, 1])
+q_obj = rbl.get_q_func([19, 50, 20, 1])
 
 
 # train the q_value function object
