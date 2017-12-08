@@ -83,6 +83,7 @@ class Env2D(object):
         self.epsilon_increase = 0.25 # epsilon increase proportion when perfance reaches a threshold
         self.alpha = 1 # controls the relationship between reward and distance to the hoop
         self.max_reward = 100
+        self.noise_level = 0.1
 
 
 
@@ -116,6 +117,8 @@ class Robotic_Manipulator_Naive(object):
         self.state = np.concatenate((self.joint_angles, self.angular_velocities, [self.release]))
         self.time = 0
         self.max_time = max_time
+        self.joint_angle_limit = np.pi / 2
+        self.joint_vel_limit = 2 * np.pi / 360.0 * 20.0
 
         # a list of homogeneous transformation matrix functions
         def r10(q, idx=0):
@@ -243,6 +246,8 @@ class Robotic_Manipulator_Naive(object):
         """
         self.angular_velocities += action[:-1]
         self.release = action[-1]
+        if np.any(np.abs(self.angular_velocities) > self.joint_vel_limit):
+            self.release = 1
 
     def _update_joint_angles(self):
         """
@@ -250,6 +255,8 @@ class Robotic_Manipulator_Naive(object):
         :return: 
         """
         self.joint_angles += self.angular_velocities
+        if np.any(np.abs(self.joint_angles) > self.joint_angle_limit):
+            self.release = 1
 
     def update_rm(self, action):
         """
@@ -371,7 +378,6 @@ def reward_function(robot_obj, env_obj):
             # reward = 1.0 / (1 + tmp_ball.min_dist_to_hoop)
             if tmp_ball.min_dist_to_hoop < env_obj.dist_threshold:
                 print("Successful throw!!!", tmp_ball.min_dist_to_hoop)
-                print()
                 # pdb.set_trace()
         # pdb.set_trace()
         return(reward)
@@ -451,6 +457,7 @@ class Policy_Object(object):
             action = self.epsilon_greedy_policy(state)
         else:
             print("Errors in policy type of the reward function!!!")
+        action = noise_in_action(action, env_obj=self.env_obj)
         return(action)
 
 
@@ -536,7 +543,17 @@ def test_q_function(q_obj, env_obj_old, num_test=100, policy_type="epsilon_greed
     return(ee_trajectory_list, ee_final_pos_list, ee_speed_list,
            sum_reward_list, score_list)
 
-
+def noise_in_action(action, env_obj):
+    """
+    to add
+    :param action: 
+    :return: 
+    """
+    new_action = np.copy(action)
+    for iii in range(env_obj.num_fixed_joints, env_obj.num_joints, 1):
+        tmp_noise = np.random.randn() * action[iii] * env_obj.noise_level
+        new_action[iii] += tmp_noise
+    return(new_action)
 
 def generate_state_trajectory(q_obj, reward_func, env_obj,
                               policy_type="epsilon_greedy"):
@@ -649,19 +666,21 @@ def neural_fitted_q_algorithm(q_obj, env_obj, data_pool, reward_func=reward_func
                                                                                             reward_func,
                                                                                             env_obj=copy.deepcopy(env_obj),
                                                                                             policy_type=policy_type)
+            if len(state_list) > 10 and reward > 50:
+                pdb.set_trace()
             if len(state_list) > 2: # at least two actions have to be made to be considered as a valid trajectory
                 X, Y = trajectory2data(state_list, action_list, reward_list, q_obj)
                 # print X.shape, Y.shape
                 # # print X, Y
                 # print(len(X_list), len(Y_list))
-                X_list.append(X)
-                Y_list.append(Y)
+                X_list.append(np.copy(X))
+                Y_list.append(np.copy(Y))
                 # X, Y, reward, score = generate_state_trajectory(robot_obj, q_obj, reward_func, alpha=1, env_obj=env_obj)
                 score_list.append(score)
                 final_reward_list.append(reward)
-                if len(reward_list) > 4 and reward > 0:
+                if len(reward_list) > 3 and reward > -1:
                     print(reward_list)
-                    print(env_obj.hoop_size)
+                    # print(env_obj.hoop_size)
 
                 num_trajectories += 1
                 data_pool.add(state_list, action_list, reward_list, q_obj)
@@ -695,8 +714,8 @@ class DataPool(object):
             # pdb.set_trace()
             X, Y = trajectory2data(state_list, action_list, reward_list, q_obj, discounting_factor=discounting_factor)
             if self.num_trajectories < self.max_trajectories:
-                self.X_list.append(X)
-                self.Y_list.append(Y)
+                self.X_list.append(np.copy(X))
+                self.Y_list.append(np.copy(Y))
                 self.rewards.append(reward_list[-1])
                 self.num_trajectories += 1
             else:
