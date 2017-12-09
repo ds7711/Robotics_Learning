@@ -31,7 +31,8 @@ if os.path.isfile(model_name):
 else:
     q_obj = rbl.get_q_func([19, 50, 20, 1])
 
-q_obj = rbl.get_q_func([19, 50, 20, 1])
+# q_obj = rbl.get_q_func([19, 50, 20, 1])
+layer_1_weights = q_obj.layers[0].get_weights()
 
 
 # train the q_value function object

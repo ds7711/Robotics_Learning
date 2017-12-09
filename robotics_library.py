@@ -10,6 +10,7 @@ from keras import regularizers
 
 import tensorflow as tf
 
+## solve the strange training data problem, homogeneous Y values in a trajectory
 
 # environment
 
@@ -46,24 +47,25 @@ class shaping(object):
 
 class Env2D(object):
 
-    def __init__(self, hoop_size=4, policy_greedy=1):
+    def __init__(self, hoop_size=4.9, policy_greedy=1):
         # configurations for the robotic arm
         self.num_joints = 6
         self.num_fixed_joints = 4
-        self.acceleration_resolution = 2.0 * np.pi / 360.0 / 5  # smallest acceleration one could apply at one time step
+        # self.acceleration_resolution = 2.0 * np.pi / 360.0 / 5  # smallest acceleration one could apply at one time step
         self.state_dimension = self.num_joints * 2
 
-        self.link_lengthes = [1, 3, 1, 1, 1, 1, 2]
+        self.link_lengthes = [1, 3, 1, 1, 1, 1, 1]
         self.initial_angles = [0, 0, 0, 0, -np.pi / 4, 0]
         self.initial_angular_velocities = np.zeros(self.num_joints)
+        self.robot_time_step = 1.0e-3
 
         # configuration for the hoop
-        self.hoop_position = np.asarray([5, 3, 2]) # hoop position
+        self.hoop_position = np.asarray([10, 3, 0.7]) # hoop position
         self.dist_threshold = 0.85 # fixed to check the performance
 
         # specify the action spaces
         self.action_spaces = [[0]] * self.num_fixed_joints + \
-                             [list(np.asarray([25, 10, 3, 1, 0, -1, -3, -10, -25]) * self.acceleration_resolution)] * \
+                             [list(np.asarray([1.0, 0.500, 0.05, 0, -0.05, -0.5, -1.0]) / self.robot_time_step)] * \
                              (self.num_joints-self.num_fixed_joints) + \
                              [[0, 1]]
         # self.action_spaces = [[0]] * self.num_fixed_joints + \
@@ -82,8 +84,9 @@ class Env2D(object):
         self.epsilon = 0.75
         self.epsilon_increase = 0.25 # epsilon increase proportion when perfance reaches a threshold
         self.alpha = 1 # controls the relationship between reward and distance to the hoop
-        self.max_reward = 100
-        self.noise_level = 0.1
+        self.max_reward = 1.0
+        self.noise_level = 1e-10
+
 
 
 
@@ -92,7 +95,7 @@ class Robotic_Manipulator_Naive(object):
 
     # to add time resolution into the manipulator
 
-    def __init__(self, link_lengthes, initial_angles, intial_angular_velocities, max_time=1000):
+    def __init__(self, link_lengthes, initial_angles, intial_angular_velocities, time_step=1e-3, max_time=1000):
         """
         create the robotic manipulator object
         :param link_lengthes: 
@@ -119,8 +122,9 @@ class Robotic_Manipulator_Naive(object):
         self.state = np.concatenate((self.joint_angles, self.angular_velocities, [self.release]))
         self.time = 0
         self.max_time = max_time
-        self.joint_angle_limit = np.pi / 2 * 10
-        self.joint_vel_limit = 2 * np.pi / 360.0 * 20.0 * 20
+        self.time_step = time_step
+        self.joint_angle_limit = np.pi / 2 * 4
+        self.joint_vel_limit = 2 * np.pi / 360.0 * 360
 
         # a list of homogeneous transformation matrix functions
         def r10(q, idx=0):
@@ -246,7 +250,7 @@ class Robotic_Manipulator_Naive(object):
         :param action: 
         :return: 
         """
-        self.angular_velocities += action[:-1]
+        self.angular_velocities += action[:-1] * self.time_step
         self.release = action[-1]
         if np.any(np.abs(self.angular_velocities) > self.joint_vel_limit):
             self.release = 1
@@ -256,7 +260,7 @@ class Robotic_Manipulator_Naive(object):
         update the joint angles
         :return: 
         """
-        self.joint_angles += self.angular_velocities
+        self.joint_angles += self.angular_velocities * self.time_step
         if np.any(np.abs(self.joint_angles) > self.joint_angle_limit):
             self.release = 1
 
@@ -372,7 +376,7 @@ def reward_function(robot_obj, env_obj):
     elif robot_obj.release == True: # if ball was released, calculate the ball's distance to the hoop when it crosses the plane of the hoop
         pos = robot_obj.loc_joints()[-1] # get ee position
         vel = robot_obj.cal_ee_speed() # get ee velocity
-        tmp_ball = Ball(pos[:3], vel[:3], env_obj)
+        tmp_ball = Ball(np.copy(pos[:3]), np.copy(vel[:3]), env_obj)
         tmp_ball.update()
 
         # if the ball is close to the hoop (distance closer than hoop size), return a reward
@@ -381,7 +385,7 @@ def reward_function(robot_obj, env_obj):
             # reward = 1.0 / (1 + tmp_ball.min_dist_to_hoop)
             if tmp_ball.min_dist_to_hoop < env_obj.dist_threshold:
                 print("Successful throw!!!", tmp_ball.min_dist_to_hoop)
-                # pdb.set_trace()
+                pdb.set_trace()
         # pdb.set_trace()
         return(reward)
     else:
@@ -518,7 +522,7 @@ def test_q_function(q_obj, env_obj_old, num_test=100, policy_type="epsilon_greed
             # store the robot's next state
             next_state = robotic_arm.state
             ee_pos_list.append(np.copy(robotic_arm.loc_joints()[-1]))
-            if robotic_arm.release == 1:
+            if robotic_arm.release:
                 ee_speed = robotic_arm.cal_ee_speed()
             # calculate the reward obtained from the next state
             reward = reward_function(robotic_arm, env_obj)
@@ -664,13 +668,13 @@ def neural_fitted_q_algorithm(q_obj, env_obj, data_pool, reward_func=reward_func
         score_list = []
         final_reward_list = []
         num_trajectories = 0
-        while len(X_list) < minimum_samples or num_trajectories < minimum_trj:
+        while len(X_list) < minimum_samples or num_trajectories < minimum_trj or \
+                        data_pool.num_trajectories < data_pool.max_trajectories:
             state_list, action_list, reward_list, reward, score = generate_state_trajectory(q_obj,
                                                                                             reward_func,
                                                                                             env_obj=copy.deepcopy(env_obj),
                                                                                             policy_type=policy_type)
-            if len(state_list) > 10 and reward > 50:
-                pdb.set_trace()
+
             if len(state_list) > 2: # at least two actions have to be made to be considered as a valid trajectory
                 X, Y = trajectory2data(state_list, action_list, reward_list, q_obj)
                 # print X.shape, Y.shape
@@ -716,6 +720,13 @@ class DataPool(object):
         if reward_list[-1] > self.minimum_rewards:
             # pdb.set_trace()
             X, Y = trajectory2data(state_list, action_list, reward_list, q_obj, discounting_factor=discounting_factor)
+
+            # for debug
+            if len(Y) > 2 and np.all(np.abs(np.diff(Y[:-1])) < 1e-5):
+                pdb.set_trace()
+            # for debug
+
+
             if self.num_trajectories < self.max_trajectories:
                 self.X_list.append(np.copy(X))
                 self.Y_list.append(np.copy(Y))
@@ -748,7 +759,7 @@ def shaping_training(q_obj, env_obj, data_pool, shaping_factor=1.4, reward_func=
             max_score = np.mean(score)
             env_obj.hoop_size = env_obj.hoop_size / shaping_factor
             # env_obj.policy_greedy += shaping_factor
-            # env_obj.epsilon += env_obj.epsilon_increase * (1 - env_obj.epsilon)
+            env_obj.epsilon += env_obj.epsilon_increase * (1 - env_obj.epsilon)
             # env_obj.epsilon = env_obj.epsilon ** 3
 
         print("-------------------------------------------------------------------------")
@@ -757,7 +768,7 @@ def shaping_training(q_obj, env_obj, data_pool, shaping_factor=1.4, reward_func=
 
         q_obj = new_q_obj # update to new q_object
         iii += 1
-        if iii % 2 == 0:
+        if iii % 1 == 0:
             pdb.set_trace()
             pass
 
