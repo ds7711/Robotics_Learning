@@ -32,14 +32,14 @@ else:
     q_obj = rbl.get_q_func([19, 50, 20, 1])
 
 # q_obj = rbl.get_q_func([19, 50, 20, 1])
-layer_1_weights = q_obj.layers[0].get_weights()
+
+# q_obj = rbl.get_q_func([19, 50, 20, 1])
 
 
 # train the q_value function object
 positive_data = rbl.DataPool(q_obj, max_trajectories=100)
 
-env_obj.hoop_size = 4.0
-print(env_obj.hoop_size)
+
 q_obj, reward_list, score_list = rbl.shaping_training(q_obj, env_obj, positive_data,
                                                       num_iterations=50, model_name=model_name,
                                                       policy_type="epsilon_greedy")
