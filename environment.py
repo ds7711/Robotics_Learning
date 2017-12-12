@@ -12,7 +12,7 @@ class Env2D(object):
         self.state_dimension = (self.num_joints - self.num_fixed_joints) * 2
 
         self.link_lengthes = np.asarray([1, 3, 1, 1, 1, 1, 1.0])
-        self.initial_angles = np.asarray([0, 0, 0, 0, -np.pi / 4, 0])
+        self.initial_angles = np.asarray([0, 0, 0, 0, -np.pi / 2, 0])
         self.initial_angular_velocities = np.zeros(self.num_joints)
 
         # initial configuration of the robot
@@ -25,6 +25,9 @@ class Env2D(object):
         self.hoop_position = np.asarray([7.5, 3, 0.7], dtype=np.double)  # hoop position
         self.dist_threshold = 1.0 / 2  # fixed to check the performance
 
+        # distance between the initial ee position and hoop position
+        self.ee2hoop = np.linalg.norm(self.ini_ee_pos - self.hoop_position)
+
         # specify the action spaces of the acceleration
         self.speed_norm_factor = 10.0e-3
         self.num_speeds = 40 / 2
@@ -34,7 +37,6 @@ class Env2D(object):
                              [list(self.speed_range)] * (self.num_joints-self.num_fixed_joints)
         self.action_noise = 1.0 / self.num_speeds / self.speed_norm_factor / 2.0 # random noise added to the action
 
-        # pdb.set_trace()
         # enumerate all possible actions available
         self.action_combinations = np.asarray(list(itertools.product(*self.action_spaces)))
 

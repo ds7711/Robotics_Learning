@@ -117,7 +117,8 @@ class RobotArm(object):
                                                     ])
         self.rotation_axises = ["z", "x", "x", "z", "y", "y"]
         self.initial_joint_angles = np.asarray(initial_angles, dtype=np.double)
-        self.joint_angles = np.asarray(initial_angles, dtype=np.double)
+        self.joint_angles = np.zeros(len(initial_angles), dtype=np.double)
+        # self.joint_angles = np.asarray(initial_angles, dtype=np.double)
         self.angular_velocities = np.asarray(intial_angular_velocities, dtype=np.double)
         self.release = 0
         self.num_joints = len(initial_angles)
