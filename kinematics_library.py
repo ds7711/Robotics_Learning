@@ -107,6 +107,7 @@ class RobotArm(object):
         :param time_step:
         """
         self.link_lengthes = np.asarray(link_lengthes)
+        self.num_joints = len(initial_angles)
         self.joint_relative_locations = np.asarray([[0, 0, self.link_lengthes[0], 1],
                                                     [0, 0, self.link_lengthes[1], 1],
                                                     [0, self.link_lengthes[2], 0, 1],
@@ -121,7 +122,10 @@ class RobotArm(object):
         # self.joint_angles = np.asarray(initial_angles, dtype=np.double)
         self.angular_velocities = np.asarray(intial_angular_velocities, dtype=np.double)
         self.release = 0
-        self.num_joints = len(initial_angles)
+
+        self.state = np.concatenate((self.joint_angles, self.angular_velocities))
+        self.state_dimension = self.state.shape[0]
+
         self.time = 0
         self.time_step = time_step
         self.joint_angle_limit = 2 * np.pi
@@ -246,14 +250,13 @@ class RobotArm(object):
         self.joint_angles = qs
         self.joint_abs_locations = self.loc_joints(self.joint_angles)
 
-    def _update_angular_velocities(self, action):
+    def _update_angular_velocities(self, movement_action):
         """
         update the angular velocities and hold/release state
-        :param action:
+        :param movement_action:
         :return:
         """
-        self.angular_velocities += action[:-1] * self.time_step
-        self.release = action[-1]
+        self.angular_velocities += movement_action * self.time_step
         if np.any(np.abs(self.angular_velocities) > self.joint_vel_limit):
             self.release = 1
 
@@ -266,16 +269,23 @@ class RobotArm(object):
         if np.any(np.abs(self.joint_angles) > self.joint_angle_limit):
             self.release = 1
 
-    def update(self, action):
+    def update(self, movement_action, release_action):
         """
         update the robot to the next time step
         update the robot's joint angles based on the velocity from previous time step and \
             angular velocity based on current action (specified as acceleration)
-        :param action: acceleration at each joint and whether to release the ball
+        :param movement_action: acceleration at each joint and whether to release the ball
+        :param release_action:
         :return:
         """
         self._update_joint_angles()
-        self._update_angular_velocities(action)
+        self._update_angular_velocities(movement_action)
+        self.release = release_action
+
+        # update the state
+        self.state[:self.num_joints] = self.joint_angles
+        self.state[self.num_joints:] = self.angular_velocities
+
         self.time += self.time_step
 
     def _jacobian_matrix(self, x, qs=None, reference_frame=6, delta=1e-10):

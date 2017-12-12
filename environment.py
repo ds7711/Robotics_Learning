@@ -39,7 +39,7 @@ class Env2D(object):
 
         # enumerate all possible actions available
         self.action_combinations = np.asarray(list(itertools.product(*self.action_spaces)))
-
+        self.action_idxes = np.arange(self.action_combinations.shape[0])
         # create array for storing state_action_pairs
         self.ext_action_cmbs = np.hstack((np.zeros((len(self.action_combinations), self.state_dimension)),
                                           self.action_combinations[:, -2:]))

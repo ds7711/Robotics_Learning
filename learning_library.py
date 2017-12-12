@@ -132,7 +132,7 @@ def reward_function(pos, vel, threshold, target_pos, gravity):
         return(reward * 2.0)
 
 
-def random_explorer(num_movements, threshold, env):
+def random_explorer(ra, num_movements, threshold, env):
     """
     an explorer that explores certain number of steps until release happened
     :param num_movements: 
@@ -140,9 +140,6 @@ def random_explorer(num_movements, threshold, env):
     :param env: 
     :return: 
     """
-
-    # initialize the robot arm
-    ra = copy.deepcopy(env.ini_ra)
 
     # get hoop position
     hoop_position = env.hoop_position
@@ -157,11 +154,12 @@ def random_explorer(num_movements, threshold, env):
     state_list = [np.copy(ra.state)]
     move_action_list = []
     release_action_lsit = np.zeros(num_movements)
+    release_action_lsit[-1] = 1
     reward_list = [0.0]
 
-    for _ in range(num_movements):
+    for release_action in release_action_lsit:
         # get the action randomly, never select release until number of movements were tried
-        move_action, release_action = _random_move(2, action_cmbs, action_idxes)
+        move_action, _ = _random_move(2, action_cmbs, action_idxes)
         # store the action
         move_action_list.append(move_action)
         # update the robot
@@ -180,29 +178,105 @@ def random_explorer(num_movements, threshold, env):
         reward_list.append(reward)
     move_action, release_action = _random_move(-1, action_cmbs, action_idxes)
     move_action_list.append(move_action)  # add a action selected at the last state
-    release_action_lsit[-1] = release_action
+
 
     return(np.asarray(state_list), np.asarray(move_action_list),
            release_action_lsit,
            np.asarray(reward_list))
 
 
-def hybrid_move():
+def exploiter(ra, move_agent, release_agent,
+              move_epsilon, release_epislon, threshold, env):
+
+
+
     pass
 
 
-# class PolicyObject(object):
-#
-#     def __init__(self, move_agent, release_agent,
-#                  action_cmbs, ext_action_cmbs,
-#                  state_dimension):
-#
-#         self.action_combinations = action_cmbs
-#         self.ext_action_cmbs = ext_action_cmbs
-#         self.action_indexes = np.arange(action_cmbs.shape[0])
-#         self.mover_q = move_agent
-#         self.releaser_q = release_agent
-#         self.state_dimension = state_dimension
+def explorer():
+
+    pass
+
+
+class PolicyObject(object):
+
+    def __init__(self, move_agent, release_agent,
+                 env):
+
+        # action spaces
+        # self.env = env
+        self.action_cmbs = env.action_combinations
+        self.ext_action_cmbs = env.ext_action_cmbs
+        self.action_idxes = env.action_idxes
+
+        # mover and releaser
+        self.mover_q = move_agent
+        self.releaser_q = release_agent
+        self.hoop_position = env.hoop_position
+
+        # state dimension
+        self.state_dimension = env.state_dimension
+
+        # epsilon
+        # self.exploit_epislon = exploit_epislon
+        # self.explore_epislon = explore_epislon
+
+    def _epsilon_greedy_action(self, state, move_epislon, release_epislon):
+
+        self.ext_action_cmbs[:, :self.state_dimension] = state
+        ext_cmbs_2d = self.ext_action_cmbs[:, [4, 5, 10, 11]]
+
+        mover_q_values = self.mover_q.predict(ext_cmbs_2d)
+        releaser_q_values = np.squeeze(self.releaser_q.predict(state[np.newaxis,
+                                                                     [4, 5, 10, 11]]))
+
+        if np.random.rand() < move_epislon:
+            act_idx = np.argmax(mover_q_values)
+            move_action = self.action_cmbs[act_idx]
+        else:
+            act_idx = np.random.choice(self.action_idxes)
+            move_action = self.action_cmbs[act_idx]
+
+        release_action = releaser_q_values > release_epislon
+
+        return(move_action, release_action)
+
+    def epsilon_greedy_trajectory(self, ra, move_epsilon, release_epislon, threshold):
+
+        # initialize list to store the trajectory
+        state_list = [np.copy(ra.state)]
+        move_action_list = []
+        release_action_lsit = []
+        reward_list = [0.0]
+
+        while not ra.release:
+            # get the action randomly, never select release until number of movements were tried
+            move_action, release_action = self._epsilon_greedy_action(ra.state, move_epsilon,
+                                                                      release_epislon)
+            # store the action
+            move_action_list.append(move_action)
+            # update the robot
+            ra.update(move_action, release_action)
+
+            # add the new state to the state list
+            state_list.append(np.copy(ra.state))
+
+            # return reward based on whether the ball was released
+            if not release_action:
+                reward = 0.0
+            else:
+                ee_pos = ra.loc_joints()[-1][:-1]
+                ee_speed = ra.cal_ee_speed()[:-1]
+                reward = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
+                                         self.gravity)
+            reward_list.append(reward)
+        move_action, release_action = _random_move(threshold, self.action_cmbs, self.action_idxes)
+        move_action_list.append(move_action)  # add a action selected at the last state
+
+        return (np.asarray(state_list), np.asarray(move_action_list),
+                release_action_lsit,
+                np.asarray(reward_list))
+
 #
 #     def select_action(self, state, policy_type=None):
 #         """

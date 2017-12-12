@@ -4,7 +4,17 @@ import learning_library as lnl
 import environment
 import matplotlib.pylab as plt
 import copy
+import pdb
 
+
+# 4. test the random_explorer
+env = environment.Env2D()
+ra = copy.deepcopy(env.ini_ra)
+threshold = 10.0
+pdb.set_trace()
+states, move_actions, release_actions, rewards = lnl.random_explorer(ra, 3, threshold, env)
+
+print(states)
 
 # 3. test reward function
 env = environment.Env2D()
