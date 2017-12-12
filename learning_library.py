@@ -132,55 +132,112 @@ def reward_function(pos, vel, threshold, target_pos, gravity):
         return(reward * 2.0)
 
 
+def random_explorer(num_movements, threshold, env):
+    """
+    an explorer that explores certain number of steps until release happened
+    :param num_movements: 
+    :param threshold: 
+    :param env: 
+    :return: 
+    """
 
+    # initialize the robot arm
+    ra = copy.deepcopy(env.ini_ra)
 
-class PolicyObject(object):
+    # get hoop position
+    hoop_position = env.hoop_position
+    gravity = env.gravity
 
-    def __init__(self, move_agent, release_agent,
-                 action_cmbs, ext_action_cmbs,
-                 state_dimension):
+    # get values needed
+    action_cmbs = env.action_combinations
+    # ext_action_cmbs = env.ext_action_cmbs
+    action_idxes = env.action_idxes
 
-        self.action_combinations = action_cmbs
-        self.ext_action_cmbs = ext_action_cmbs
-        self.action_indexes = np.arange(action_cmbs.shape[0])
-        self.mover_q = move_agent
-        self.releaser_q = release_agent
-        self.state_dimension = state_dimension
+    # initialize list to store the trajectory
+    state_list = [np.copy(ra.state)]
+    move_action_list = []
+    release_action_lsit = np.zeros(num_movements)
+    reward_list = [0.0]
 
-    def select_action(self, state, policy_type=None):
-        """
-        return action based on the state
-        :param state: joint angle and velocity
-        :param policy_type: 
-        :return: 
-        """
-        if policy_type == "softmax":
-            action = self.softmax_policy(state)
-        elif policy_type == "epsilon_greedy":
-            action = self.epsilon_greedy_policy(state)
+    for _ in range(num_movements):
+        # get the action randomly, never select release until number of movements were tried
+        move_action, release_action = _random_move(2, action_cmbs, action_idxes)
+        # store the action
+        move_action_list.append(move_action)
+        # update the robot
+        ra.update(move_action, release_action)
+
+        # add the new state to the state list
+        state_list.append(np.copy(ra.state))
+
+        # return reward based on whether the ball was released
+        if not release_action:
+            reward = 0.0
         else:
-            print("Errors in policy type of the reward function!!!")
-        return(action)
+            ee_pos = ra.loc_joints()[-1][:-1]
+            ee_speed = ra.cal_ee_speed()[:-1]
+            reward = reward_function(ee_pos, ee_speed, threshold, hoop_position, gravity)
+        reward_list.append(reward)
+    move_action, release_action = _random_move(-1, action_cmbs, action_idxes)
+    move_action_list.append(move_action)  # add a action selected at the last state
+    release_action_lsit[-1] = release_action
 
-    def epsilon_greedy_policy(self, state):
-        """
-        return the selected action based on the epsilon greedy
-        :param state:
-        :return:
-        """
-        self.ext_action_cmbs[:, :self.state_dimension] = state
-        two_d_data = self.ext_action_cmbs[:, :[4, 5, 10, 11]]
+    return(np.asarray(state_list), np.asarray(move_action_list),
+           release_action_lsit,
+           np.asarray(reward_list))
 
-        mover_q_values = self.mover_q.predict(self.ext_action_cmbs)
-        releaser_q_values = np.squeeze(self.releaser_q.predict(state[np.newaxis, :]))
 
-        est_q_values = self.q_obj.predict(self.env_obj.ext_action_cmbs)
-        if np.random.rand() < self.env_obj.epsilon:
-            act_idx = np.argmax(est_q_values)
-            return(self.env_obj.action_combinations[act_idx])
-        else:
-            act_idx = np.random.choice(self.action_indexes)
-            return (self.env_obj.action_combinations[act_idx])
+def hybrid_move():
+    pass
+
+
+# class PolicyObject(object):
+#
+#     def __init__(self, move_agent, release_agent,
+#                  action_cmbs, ext_action_cmbs,
+#                  state_dimension):
+#
+#         self.action_combinations = action_cmbs
+#         self.ext_action_cmbs = ext_action_cmbs
+#         self.action_indexes = np.arange(action_cmbs.shape[0])
+#         self.mover_q = move_agent
+#         self.releaser_q = release_agent
+#         self.state_dimension = state_dimension
+#
+#     def select_action(self, state, policy_type=None):
+#         """
+#         return action based on the state
+#         :param state: joint angle and velocity
+#         :param policy_type:
+#         :return:
+#         """
+#         if policy_type == "softmax":
+#             action = self.softmax_policy(state)
+#         elif policy_type == "epsilon_greedy":
+#             action = self.epsilon_greedy_policy(state)
+#         else:
+#             print("Errors in policy type of the reward function!!!")
+#         return(action)
+#
+#     def epsilon_greedy_policy(self, state):
+#         """
+#         return the selected action based on the epsilon greedy
+#         :param state:
+#         :return:
+#         """
+#         self.ext_action_cmbs[:, :self.state_dimension] = state
+#         two_d_data = self.ext_action_cmbs[:, :[4, 5, 10, 11]]
+#
+#         mover_q_values = self.mover_q.predict(self.ext_action_cmbs)
+#         releaser_q_values = np.squeeze(self.releaser_q.predict(state[np.newaxis, :]))
+#
+#         est_q_values = self.q_obj.predict(self.env_obj.ext_action_cmbs)
+#         if np.random.rand() < self.env_obj.epsilon:
+#             act_idx = np.argmax(est_q_values)
+#             return(self.env_obj.action_combinations[act_idx])
+#         else:
+#             act_idx = np.random.choice(self.action_indexes)
+#             return (self.env_obj.action_combinations[act_idx])
 
 
 #     def softmax_policy(self, state_action, ):
@@ -198,9 +255,23 @@ class PolicyObject(object):
 #         return(action)
 #
 
-#
-
-
 
 def generate_trajectories(ra, throw_agent, release_agent):
     pass
+
+
+# supplementary function
+
+
+def _random_move(epsilon, action_cmbs, action_idxes):
+    """
+    randomly select a move action, select release based on epsilon
+    :param epsilon: 
+    :param action_cmbs: 
+    :param action_idxes: 
+    :return: 
+    """
+    rdx = np.random.choice(action_idxes)  # randomly choose a move action
+    move_action = action_cmbs[rdx]
+    release_action = np.random.rand() > epsilon
+    return(move_action, release_action)
