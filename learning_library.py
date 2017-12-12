@@ -3,6 +3,66 @@ import kinematics_library as knl
 from keras.models import Sequential
 from keras.layers import Dense, Activation
 from keras import regularizers
+import copy
+
+
+def shaping_training(env):
+
+    # initialize mover and releaser
+
+    # initialize score criterion and reward threshold
+    reward_threshold = None
+    threshold_increase = 1.5
+    score_threhold = env.score_threshold
+
+    # initialize the exploiter, explorer, and joker
+    #   joker choose totally random actions and didn't care about rewards
+    #   exploiter uses the current best policy
+    #   explorer explore based on the current best policy
+
+    # test the performance of the exploiter
+
+    # initialize container for trajectories that actually scored!
+
+    # loop until score performance reaches the threshold or pleateu or maximum iteration reached
+    while True:
+
+        # delete the old training data and initialize the new container
+
+        # Repeatedly generate trajectories using explorer & exploiter
+        while True:
+            # generate trajectories using explorer, exploiter, and joker
+
+            # collect good, bad, and exploratory trajectories
+            # good: data that has the biggest reward
+            # bad: data that has least reward
+            # exploratory: data from random behavior
+
+            pass
+
+        # Iteratively train the exploiter
+        while True:
+            # train the exploiter with the data in back-propagating way
+            #   1st: train with data of the last time step from all trajectories until converge
+
+            #   2nd: update the q_value from the previous step and then train until converge
+
+            #   3rd: repeat until data from prevous time step doesn't have enough data
+
+            #   4th: train with all the data until converge
+
+            pass
+
+        # test that exploiter could reliably do the current best behavior and record the data
+
+        # increase the reward threshold for next training iteration
+        reward_threshold /= threshold_increase
+
+        pass
+
+    # return the exploiter that achieves desiered performance: q function, policy parameters
+
+    pass
 
 
 def get_move_agent(units_list, common_activation_func="relu", regularization=regularizers.l2(0.1)):
@@ -22,6 +82,7 @@ def get_move_agent(units_list, common_activation_func="relu", regularization=reg
         model.add(Dense(num_unit, kernel_regularizer=regularization))
         model.add(Activation(common_activation_func))
     model.add(Dense(units_list[-1], kernel_regularizer=regularization))
+    model.add(Activation("tanh"))
     model.compile(loss="mean_squared_error", optimizer="adam")
     return(model)
 
@@ -42,7 +103,7 @@ def get_release_agent(units_list, common_activation_func="relu", regularization=
         model.add(Dense(num_unit, kernel_regularizer=regularization))
         model.add(Activation(common_activation_func))
     model.add(Dense(units_list[-1], kernel_regularizer=regularization))
-    model.add(Activation("sigmoid"))
+    model.add(Activation("tanh"))
     model.compile(loss="mean_squared_error", optimizer="adam")
     return(model)
 
@@ -69,6 +130,77 @@ def reward_function(pos, vel, threshold, target_pos, gravity):
     else:
         reward = beta / (beta + dist2t) - 0.5
         return(reward * 2.0)
+
+
+
+
+class PolicyObject(object):
+
+    def __init__(self, move_agent, release_agent,
+                 action_cmbs, ext_action_cmbs,
+                 state_dimension):
+
+        self.action_combinations = action_cmbs
+        self.ext_action_cmbs = ext_action_cmbs
+        self.action_indexes = np.arange(action_cmbs.shape[0])
+        self.mover_q = move_agent
+        self.releaser_q = release_agent
+        self.state_dimension = state_dimension
+
+    def select_action(self, state, policy_type=None):
+        """
+        return action based on the state
+        :param state: joint angle and velocity
+        :param policy_type: 
+        :return: 
+        """
+        if policy_type == "softmax":
+            action = self.softmax_policy(state)
+        elif policy_type == "epsilon_greedy":
+            action = self.epsilon_greedy_policy(state)
+        else:
+            print("Errors in policy type of the reward function!!!")
+        return(action)
+
+    def epsilon_greedy_policy(self, state):
+        """
+        return the selected action based on the epsilon greedy
+        :param state:
+        :return:
+        """
+        self.ext_action_cmbs[:, :self.state_dimension] = state
+        two_d_data = self.ext_action_cmbs[:, :[4, 5, 10, 11]]
+
+        mover_q_values = self.mover_q.predict(self.ext_action_cmbs)
+        releaser_q_values = np.squeeze(self.releaser_q.predict(state[np.newaxis, :]))
+
+        est_q_values = self.q_obj.predict(self.env_obj.ext_action_cmbs)
+        if np.random.rand() < self.env_obj.epsilon:
+            act_idx = np.argmax(est_q_values)
+            return(self.env_obj.action_combinations[act_idx])
+        else:
+            act_idx = np.random.choice(self.action_indexes)
+            return (self.env_obj.action_combinations[act_idx])
+
+
+#     def softmax_policy(self, state_action, ):
+#         """
+#         choose action based on the probability from softmax of the q value
+#         :param state:
+#         :param exploring_factor: balance exploration and exploitation
+#         :return:
+#         """
+#         self.ext_action_cmbs[:, :self.env_obj.state_dimension] = state
+#         est_q_values = self.q_obj.predict(self.env_obj.ext_action_cmbs)
+#         exponential_values = np.exp(est_q_values * self.greedy)
+#         probs = exponential_values / np.sum(exponential_values)
+#         action = self.env_obj.action_combinations[np.random.choice(self.action_indexes, p=np.squeeze(probs))]
+#         return(action)
+#
+
+#
+
+
 
 def generate_trajectories(ra, throw_agent, release_agent):
     pass
