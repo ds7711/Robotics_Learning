@@ -179,29 +179,21 @@ def random_explorer(ra, num_movements, threshold, env):
     move_action, release_action = _random_move(-1, action_cmbs, action_idxes)
     move_action_list.append(move_action)  # add a action selected at the last state
 
-
     return(np.asarray(state_list), np.asarray(move_action_list),
            release_action_lsit,
            np.asarray(reward_list))
-
-
-def exploiter(ra, move_agent, release_agent,
-              move_epsilon, release_epislon, threshold, env):
-
-
-
-    pass
-
-
-def explorer():
-
-    pass
 
 
 class PolicyObject(object):
 
     def __init__(self, move_agent, release_agent,
                  env):
+        """
+        initialize policy object
+        :param move_agent:
+        :param release_agent:
+        :param env:
+        """
 
         # action spaces
         # self.env = env
@@ -224,6 +216,13 @@ class PolicyObject(object):
         # self.explore_epislon = explore_epislon
 
     def _epsilon_greedy_action(self, state, move_epislon, release_epislon):
+        """
+        select move and release action
+        :param state: joint angles and velocities
+        :param move_epislon:
+        :param release_epislon:
+        :return:
+        """
 
         self.ext_action_cmbs[:, :self.state_dimension] = state
         ext_cmbs_2d = self.ext_action_cmbs[:, [4, 5, 10, 11, 16, 17]]
@@ -244,6 +243,14 @@ class PolicyObject(object):
         return(move_action, release_action)
 
     def random_explorer(self, ra, num_movements, threshold):
+        """
+        select actions randomly
+        :param ra:
+        :param num_movements: select the number of movements before releasing the ball
+        :param threshold:
+        :return:
+        """
+
         # get hoop position
         hoop_position = self.hoop_position
         gravity = self.gravity
@@ -263,6 +270,10 @@ class PolicyObject(object):
         for release_action in release_action_lsit:
             # get the action randomly, never select release until number of movements were tried
             move_action, _ = _random_move(2, action_cmbs, action_idxes)
+
+            # add some noise to the data so no repeated trajectories
+            added_noise = np.random.randn(len(move_action)) * np.abs(move_action) * 0.5
+            move_action += added_noise
             # store the action
             move_action_list.append(move_action)
             # update the robot
@@ -287,7 +298,14 @@ class PolicyObject(object):
                 np.asarray(reward_list))
 
     def epsilon_greedy_trajectory(self, ra, move_epislon, release_epislon, threshold):
-
+        """
+        generate trajectories based on epsilon greedy method
+        :param ra:
+        :param move_epislon:
+        :param release_epislon:
+        :param threshold:
+        :return:
+        """
         # initialize list to store the trajectory
         state_list = [np.copy(ra.state)]
         move_action_list = []
@@ -325,6 +343,15 @@ class PolicyObject(object):
                 np.asarray(reward_list))
 
     def power_exploring_trajectory(self, ra, move_epislon, release_epislon, threshold, noise):
+        """
+        explore new trajectories by adding noise into the existing good trajectories
+        :param ra:
+        :param move_epislon:
+        :param release_epislon:
+        :param threshold:
+        :param noise:
+        :return:
+        """
         # initialize list to store the trajectory
         state_list = [np.copy(ra.state)]
         move_action_list = []
@@ -364,6 +391,14 @@ class PolicyObject(object):
                 np.asarray(reward_list))
 
     def greedy_plus_random_explorer(self, ra, move_epislon, release_epislon, threshold):
+        """
+        create new trajectories by extending beyond current best policies
+        :param ra:
+        :param move_epislon:
+        :param release_epislon:
+        :param threshold:
+        :return:
+        """
 
         states0, move_actions0, release_actions0, rewards0 = self.epsilon_greedy_trajectory(ra, move_epislon,
                                                                                             release_epislon,
@@ -382,6 +417,15 @@ class PolicyObject(object):
                 np.asarray(reward_list))
 
     def power_plus_random_explorer(self, ra, move_epislon, release_epislon, threshold, noise):
+        """
+        combinng power with random exploration to explore better policies
+        :param ra:
+        :param move_epislon:
+        :param release_epislon:
+        :param threshold:
+        :param noise:
+        :return:
+        """
 
         states0, move_actions0, release_actions0, rewards0 = self.power_exploring_trajectory(ra, move_epislon,
                                                                                              release_epislon,
@@ -449,11 +493,6 @@ class PolicyObject(object):
 #         probs = exponential_values / np.sum(exponential_values)
 #         action = self.env_obj.action_combinations[np.random.choice(self.action_indexes, p=np.squeeze(probs))]
 #         return(action)
-#
-
-
-def generate_trajectories(ra, throw_agent, release_agent):
-    pass
 
 
 # supplementary function
