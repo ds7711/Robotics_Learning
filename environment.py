@@ -9,7 +9,7 @@ class Env2D(object):
         # configurations for the robotic arm
         self.num_joints = 6
         self.num_fixed_joints = 4
-        self.state_dimension = (self.num_joints - self.num_fixed_joints) * 2
+        self.state_dimension = self.num_joints * 2
 
         self.link_lengthes = np.asarray([1, 3, 1, 1, 1, 1, 1.0])
         self.initial_angles = np.asarray([0, 0, 0, 0, -np.pi / 2, 0])
@@ -42,10 +42,13 @@ class Env2D(object):
         self.action_idxes = np.arange(self.action_combinations.shape[0])
         # create array for storing state_action_pairs
         self.ext_action_cmbs = np.hstack((np.zeros((len(self.action_combinations), self.state_dimension)),
-                                          self.action_combinations[:, -2:]))
+                                          self.action_combinations))
 
         # ball information
         self.gravity = -10.0
+
+        # maximum number of time steps
+        self.max_time = 0.1
 
         # parameters used for training
         self.policy_greedy = 1.0 # change the steepness of the softmax function of the policy object
