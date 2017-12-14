@@ -1,6 +1,7 @@
 """
 1. reward_function: continuous, not very discrete, may not be a good idea???
 2. Seperate reward function for the releaser and mover??? Use LQR for mover as a planning problem
+3. Power exploring trajectory to be changed
 """
 
 

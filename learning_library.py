@@ -215,6 +215,17 @@ class PolicyObject(object):
         # self.exploit_epislon = exploit_epislon
         # self.explore_epislon = explore_epislon
 
+    def _random_move(self, release_epislon):
+        """
+        randomly select a move action, select release based on epsilon
+        :param release_epislon:
+        :return:
+        """
+        rdx = np.random.choice(self.action_idxes)  # randomly choose a move action
+        move_action = self.action_cmbs[rdx]
+        release_action = np.random.rand() > release_epislon
+        return (move_action, release_action)
+
     def _epsilon_greedy_action(self, state, move_epislon, release_epislon):
         """
         select move and release action
@@ -255,43 +266,38 @@ class PolicyObject(object):
         hoop_position = self.hoop_position
         gravity = self.gravity
 
-        # get values needed
-        action_cmbs = self.action_cmbs
-        # ext_action_cmbs = env.ext_action_cmbs
-        action_idxes = self.action_idxes
-
         # initialize list to store the trajectory
         state_list = [np.copy(ra.state)]
         move_action_list = []
         release_action_lsit = np.zeros(num_movements)
         release_action_lsit[-1] = 1
-        reward_list = [0.0]
+        reward_list = []
 
         for release_action in release_action_lsit:
-            # get the action randomly, never select release until number of movements were tried
-            move_action, _ = _random_move(2, action_cmbs, action_idxes)
-
-            # add some noise to the data so no repeated trajectories
-            added_noise = np.random.randn(len(move_action)) * np.abs(move_action) * 0.5
-            move_action += added_noise
-            # store the action
-            move_action_list.append(move_action)
-            # update the robot
-            ra.update(move_action, release_action)
-
-            # add the new state to the state list
-            state_list.append(np.copy(ra.state))
-
             # return reward based on whether the ball was released
-            if not release_action:
+            if not release_action: # first test whether the ball was released
                 reward = 0.0
+                # get the action randomly, never select release until number of movements were tried
+                move_action, _ = self._random_move(2)  # set release_epislon to be bigger than 1 so that no release
+
+                # add some noise to the data so no repeated trajectories
+                added_noise = np.random.randn(len(move_action)) * np.abs(move_action) * 0.3
+                move_action += added_noise
+                # store the action
+                move_action_list.append(move_action)
+                # update the robot
+                ra.update(move_action, release_action)
+
+                # add the new state to the state list
+                state_list.append(np.copy(ra.state))
             else:
                 ee_pos = ra.loc_joints()[-1][:-1]
                 ee_speed = ra.cal_ee_speed()[:-1]
                 reward = reward_function(ee_pos, ee_speed, threshold, hoop_position, gravity)
+
+                move_action = np.zeros(self.action_cmbs.shape[1])
+                move_action_list.append(move_action)  # add a action selected at the last state
             reward_list.append(reward)
-        move_action, release_action = _random_move(-1, action_cmbs, action_idxes)
-        move_action_list.append(move_action)  # add a action selected at the last state
 
         return (np.asarray(state_list), np.asarray(move_action_list),
                 release_action_lsit,
@@ -310,36 +316,46 @@ class PolicyObject(object):
         state_list = [np.copy(ra.state)]
         move_action_list = []
         release_action_lsit = []
-        reward_list = [0.0]
+        reward_list = []
 
         while (not ra.release) and ra.time < self.max_time:
             # get the action randomly, never select release until number of movements were tried
             move_action, release_action = self._epsilon_greedy_action(ra.state, move_epislon,
                                                                       release_epislon)
-            # store the action
-            move_action_list.append(move_action)
-            release_action_lsit.append(release_action)
-            # update the robot
-            ra.update(move_action, release_action)
 
-            # add the new state to the state list
-            state_list.append(np.copy(ra.state))
-
-            # return reward based on whether the ball was released
             if not release_action:
+                # store the action
+                move_action_list.append(move_action)
+                # update the robot
+                ra.update(move_action, release_action)
+
+                # add the new state to the state list
+                state_list.append(np.copy(ra.state))
                 reward = 0.0
             else:
+                # return reward based on whether the ball was released
                 ee_pos = ra.loc_joints()[-1][:-1]
                 ee_speed = ra.cal_ee_speed()[:-1]
                 reward = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
                                          self.gravity)
+                move_action = np.zeros(self.action_cmbs.shape[1])
+                move_action_list.append(move_action)
+
+            release_action_lsit.append(release_action)
             reward_list.append(reward)
-        move_action, release_action = _random_move(threshold, self.action_cmbs, self.action_idxes)
-        move_action_list.append(move_action)  # add a action selected at the last state
-        release_action_lsit.append(release_action)
+
+        if ra.time > self.max_time: # if the ball was not released, force it to be released so that we get some data
+            move_action, release_action = np.zeros(self.action_cmbs.shape[1]), 1
+            ee_pos = ra.loc_joints()[-1][:-1]
+            ee_speed = ra.cal_ee_speed()[:-1]
+            reward = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
+                                     self.gravity)
+            move_action_list.append(move_action)
+            release_action_lsit.append(release_action)
+            reward_list.append(reward)
 
         return (np.asarray(state_list), np.asarray(move_action_list),
-                release_action_lsit,
+                np.asarray(release_action_lsit),
                 np.asarray(reward_list))
 
     def power_exploring_trajectory(self, ra, move_epislon, release_epislon, threshold, noise):
@@ -356,38 +372,50 @@ class PolicyObject(object):
         state_list = [np.copy(ra.state)]
         move_action_list = []
         release_action_lsit = []
-        reward_list = [0.0]
+        reward_list = []
 
         while (not ra.release) and ra.time < self.max_time:
             # get the action randomly, never select release until number of movements were tried
             move_action, release_action = self._epsilon_greedy_action(ra.state, move_epislon,
                                                                       release_epislon)
-            # add noise to the actions
-            added_noise = np.random.randn(self.state_dimension/2) * noise * np.abs(move_action)
-            move_action += added_noise
-            # store the action
-            move_action_list.append(move_action)
-            release_action_lsit.append(release_action)
-            # update the robot
-            ra.update(move_action, release_action)
-
-            # add the new state to the state list
-            state_list.append(np.copy(ra.state))
 
             # return reward based on whether the ball was released
             if not release_action:
                 reward = 0.0
+                # add noise to the actions
+                added_noise = np.random.randn(self.action_cmbs.shape[1]) * noise * np.abs(move_action)
+                move_action += added_noise
+                # store the action
+                move_action_list.append(move_action)
+
+                # update the robot
+                ra.update(move_action, release_action)
+
+                # add the new state to the state list
+                state_list.append(np.copy(ra.state))
             else:
                 ee_pos = ra.loc_joints()[-1][:-1]
                 ee_speed = ra.cal_ee_speed()[:-1]
                 reward = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
                                          self.gravity)
+                move_action = np.zeros(self.action_cmbs.shape[1])
+                move_action_list.append(move_action)
+
             reward_list.append(reward)
-        move_action, release_action = _random_move(threshold, self.action_cmbs, self.action_idxes)
-        move_action_list.append(move_action)  # add a action selected at the last state
+            release_action_lsit.append(release_action)
+
+        if ra.time > self.max_time: # if the ball was not released, force it to be released so that we get some data
+            move_action, release_action = np.zeros(self.action_cmbs.shape[1]), 1
+            ee_pos = ra.loc_joints()[-1][:-1]
+            ee_speed = ra.cal_ee_speed()[:-1]
+            reward = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
+                                     self.gravity)
+            move_action_list.append(move_action)
+            release_action_lsit.append(release_action)
+            reward_list.append(reward)
 
         return (np.asarray(state_list), np.asarray(move_action_list),
-                release_action_lsit,
+                np.asarray(release_action_lsit),
                 np.asarray(reward_list))
 
     def greedy_plus_random_explorer(self, ra, move_epislon, release_epislon, threshold):
@@ -413,7 +441,7 @@ class PolicyObject(object):
         reward_list = np.concatenate((rewards0[:-1], rewards1))
 
         return (np.asarray(state_list), np.asarray(move_action_list),
-                release_action_list,
+                np.asarray(release_action_list),
                 np.asarray(reward_list))
 
     def power_plus_random_explorer(self, ra, move_epislon, release_epislon, threshold, noise):
@@ -440,45 +468,8 @@ class PolicyObject(object):
         reward_list = np.concatenate((rewards0[:-1], rewards1))
 
         return (np.asarray(state_list), np.asarray(move_action_list),
-                release_action_list,
+                np.asarray(release_action_list),
                 np.asarray(reward_list))
-
-#
-#     def select_action(self, state, policy_type=None):
-#         """
-#         return action based on the state
-#         :param state: joint angle and velocity
-#         :param policy_type:
-#         :return:
-#         """
-#         if policy_type == "softmax":
-#             action = self.softmax_policy(state)
-#         elif policy_type == "epsilon_greedy":
-#             action = self.epsilon_greedy_policy(state)
-#         else:
-#             print("Errors in policy type of the reward function!!!")
-#         return(action)
-#
-#     def epsilon_greedy_policy(self, state):
-#         """
-#         return the selected action based on the epsilon greedy
-#         :param state:
-#         :return:
-#         """
-#         self.ext_action_cmbs[:, :self.state_dimension] = state
-#         two_d_data = self.ext_action_cmbs[:, :[4, 5, 10, 11]]
-#
-#         mover_q_values = self.mover_q.predict(self.ext_action_cmbs)
-#         releaser_q_values = np.squeeze(self.releaser_q.predict(state[np.newaxis, :]))
-#
-#         est_q_values = self.q_obj.predict(self.env_obj.ext_action_cmbs)
-#         if np.random.rand() < self.env_obj.epsilon:
-#             act_idx = np.argmax(est_q_values)
-#             return(self.env_obj.action_combinations[act_idx])
-#         else:
-#             act_idx = np.random.choice(self.action_indexes)
-#             return (self.env_obj.action_combinations[act_idx])
-
 
 #     def softmax_policy(self, state_action, ):
 #         """
@@ -498,15 +489,3 @@ class PolicyObject(object):
 # supplementary function
 
 
-def _random_move(epsilon, action_cmbs, action_idxes):
-    """
-    randomly select a move action, select release based on epsilon
-    :param epsilon: 
-    :param action_cmbs: 
-    :param action_idxes: 
-    :return: 
-    """
-    rdx = np.random.choice(action_idxes)  # randomly choose a move action
-    move_action = action_cmbs[rdx]
-    release_action = np.random.rand() > epsilon
-    return(move_action, release_action)
