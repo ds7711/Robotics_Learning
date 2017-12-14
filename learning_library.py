@@ -132,58 +132,6 @@ def reward_function(pos, vel, threshold, target_pos, gravity):
         return(reward * 2.0)
 
 
-def random_explorer(ra, num_movements, threshold, env):
-    """
-    an explorer that explores certain number of steps until release happened
-    :param num_movements: 
-    :param threshold: 
-    :param env: 
-    :return: 
-    """
-
-    # get hoop position
-    hoop_position = env.hoop_position
-    gravity = env.gravity
-
-    # get values needed
-    action_cmbs = env.action_combinations
-    # ext_action_cmbs = env.ext_action_cmbs
-    action_idxes = env.action_idxes
-
-    # initialize list to store the trajectory
-    state_list = [np.copy(ra.state)]
-    move_action_list = []
-    release_action_lsit = np.zeros(num_movements)
-    release_action_lsit[-1] = 1
-    reward_list = [0.0]
-
-    for release_action in release_action_lsit:
-        # get the action randomly, never select release until number of movements were tried
-        move_action, _ = _random_move(2, action_cmbs, action_idxes)
-        # store the action
-        move_action_list.append(move_action)
-        # update the robot
-        ra.update(move_action, release_action)
-
-        # add the new state to the state list
-        state_list.append(np.copy(ra.state))
-
-        # return reward based on whether the ball was released
-        if not release_action:
-            reward = 0.0
-        else:
-            ee_pos = ra.loc_joints()[-1][:-1]
-            ee_speed = ra.cal_ee_speed()[:-1]
-            reward = reward_function(ee_pos, ee_speed, threshold, hoop_position, gravity)
-        reward_list.append(reward)
-    move_action, release_action = _random_move(-1, action_cmbs, action_idxes)
-    move_action_list.append(move_action)  # add a action selected at the last state
-
-    return(np.asarray(state_list), np.asarray(move_action_list),
-           release_action_lsit,
-           np.asarray(reward_list))
-
-
 class PolicyObject(object):
 
     def __init__(self, move_agent, release_agent,
@@ -340,11 +288,13 @@ class PolicyObject(object):
                                          self.gravity)
                 move_action = np.zeros(self.action_cmbs.shape[1])
                 move_action_list.append(move_action)
+                ra.update(move_action, release_action)  # update the ra state to break the loop
 
             release_action_lsit.append(release_action)
             reward_list.append(reward)
+            print(ra.time)
 
-        if ra.time > self.max_time: # if the ball was not released, force it to be released so that we get some data
+        if ra.time > self.max_time:  # if the ball was not released, force it to be released so that we get some data
             move_action, release_action = np.zeros(self.action_cmbs.shape[1]), 1
             ee_pos = ra.loc_joints()[-1][:-1]
             ee_speed = ra.cal_ee_speed()[:-1]
@@ -379,32 +329,33 @@ class PolicyObject(object):
             move_action, release_action = self._epsilon_greedy_action(ra.state, move_epislon,
                                                                       release_epislon)
 
-            # return reward based on whether the ball was released
             if not release_action:
-                reward = 0.0
                 # add noise to the actions
                 added_noise = np.random.randn(self.action_cmbs.shape[1]) * noise * np.abs(move_action)
                 move_action += added_noise
                 # store the action
                 move_action_list.append(move_action)
-
                 # update the robot
                 ra.update(move_action, release_action)
 
                 # add the new state to the state list
                 state_list.append(np.copy(ra.state))
+                reward = 0.0
             else:
+                # return reward based on whether the ball was released
                 ee_pos = ra.loc_joints()[-1][:-1]
                 ee_speed = ra.cal_ee_speed()[:-1]
                 reward = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
                                          self.gravity)
                 move_action = np.zeros(self.action_cmbs.shape[1])
                 move_action_list.append(move_action)
+                ra.update(move_action, release_action)
 
+            print(ra.time)
             reward_list.append(reward)
             release_action_lsit.append(release_action)
 
-        if ra.time > self.max_time: # if the ball was not released, force it to be released so that we get some data
+        if ra.time > self.max_time:  # if the ball was not released, force it to be released so that we get some data
             move_action, release_action = np.zeros(self.action_cmbs.shape[1]), 1
             ee_pos = ra.loc_joints()[-1][:-1]
             ee_speed = ra.cal_ee_speed()[:-1]
