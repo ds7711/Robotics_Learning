@@ -189,16 +189,20 @@ class PolicyObject(object):
         mover_q_values = self.mover_q.predict(ext_cmbs_2d)
         releaser_q_values = np.squeeze(self.releaser_q.predict(state[np.newaxis,
                                                                      [4, 5, 10, 11]]))
-
         if np.random.rand() < move_epislon:
             act_idx = np.argmax(mover_q_values)
             move_action = self.action_cmbs[act_idx]
         else:
             act_idx = np.random.choice(self.action_idxes)
             move_action = self.action_cmbs[act_idx]
-
-        release_action = releaser_q_values > release_epislon
-
+        # release the ball only if one is really certain, otherwise, release the ball based on the confidence.
+        # minimum releasing probability is 20%.
+        release_probability = (releaser_q_values + 1) / 2.0
+        if release_probability > release_epislon:
+            release_action = 1
+        else:
+            # release_action = np.random.rand() < (release_probability + 1 - release_epislon)
+            release_action = np.random.rand() < (1 - release_epislon)
         return(move_action, release_action)
 
     def random_explorer(self, ra, num_movements, threshold):
@@ -223,7 +227,7 @@ class PolicyObject(object):
 
         for release_action in release_action_lsit:
             # return reward based on whether the ball was released
-            if not release_action: # first test whether the ball was released
+            if not release_action:  # first test whether the ball was released
                 reward = 0.0
                 # get the action randomly, never select release until number of movements were tried
                 move_action, _ = self._random_move(2)  # set release_epislon to be bigger than 1 so that no release
@@ -288,11 +292,11 @@ class PolicyObject(object):
                                          self.gravity)
                 move_action = np.zeros(self.action_cmbs.shape[1])
                 move_action_list.append(move_action)
-                ra.update(move_action, release_action)  # update the ra state to break the loop
+                ra.release = True  # update the ra state to break the loop
 
             release_action_lsit.append(release_action)
             reward_list.append(reward)
-            print(ra.time)
+            # print(ra.time)
 
         if ra.time > self.max_time:  # if the ball was not released, force it to be released so that we get some data
             move_action, release_action = np.zeros(self.action_cmbs.shape[1]), 1
@@ -342,16 +346,16 @@ class PolicyObject(object):
                 state_list.append(np.copy(ra.state))
                 reward = 0.0
             else:
-                # return reward based on whether the ball was released
+                # return reward based on where the ball was released
                 ee_pos = ra.loc_joints()[-1][:-1]
                 ee_speed = ra.cal_ee_speed()[:-1]
                 reward = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
                                          self.gravity)
                 move_action = np.zeros(self.action_cmbs.shape[1])
                 move_action_list.append(move_action)
-                ra.update(move_action, release_action)
+                ra.release = True  # release the ball
 
-            print(ra.time)
+            # print(ra.time)
             reward_list.append(reward)
             release_action_lsit.append(release_action)
 
@@ -383,7 +387,7 @@ class PolicyObject(object):
                                                                                             release_epislon,
                                                                                             threshold)
         # release_actions0[-1] = 0
-        num_extra_movements = np.random.randint(1, len(states0)+1)
+        num_extra_movements = np.random.randint(2, len(states0)+2)
         ra.release = 0
         states1, move_actions1, release_actions1, rewards1 = self.random_explorer(ra, num_extra_movements, threshold)
         state_list = np.vstack((states0[:-1], states1))
@@ -410,7 +414,7 @@ class PolicyObject(object):
                                                                                              release_epislon,
                                                                                              threshold, noise)
         # release_actions0[-1] = 0
-        num_extra_movements = np.random.randint(1, len(states0)+1)
+        num_extra_movements = np.random.randint(2, len(states0)+2)
         ra.release = 0
         states1, move_actions1, release_actions1, rewards1 = self.random_explorer(ra, num_extra_movements, threshold)
         state_list = np.vstack((states0[:-1], states1))
