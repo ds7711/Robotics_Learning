@@ -2,6 +2,8 @@
 1. reward_function: continuous, not very discrete, may not be a good idea???
 2. Seperate reward function for the releaser and mover??? Use LQR for mover as a planning problem
 3. _Epislon_greedy release action has to be changed
+4. Trajectory2Data to be completed
+5. DataPool to be completed
 """
 
 

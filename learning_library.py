@@ -426,21 +426,39 @@ class PolicyObject(object):
                 np.asarray(release_action_list),
                 np.asarray(reward_list))
 
-#     def softmax_policy(self, state_action, ):
-#         """
-#         choose action based on the probability from softmax of the q value
-#         :param state:
-#         :param exploring_factor: balance exploration and exploitation
-#         :return:
-#         """
-#         self.ext_action_cmbs[:, :self.env_obj.state_dimension] = state
-#         est_q_values = self.q_obj.predict(self.env_obj.ext_action_cmbs)
-#         exponential_values = np.exp(est_q_values * self.greedy)
-#         probs = exponential_values / np.sum(exponential_values)
-#         action = self.env_obj.action_combinations[np.random.choice(self.action_indexes, p=np.squeeze(probs))]
-#         return(action)
+
+def trj2data(states, move_actions, release_actions, rewards, mover_q, releaser_q, discounting_factor):
+    # calculate the data for training the releaser
+
+    # calculate the data for training the mover
+    pass
 
 
-# supplementary function
+class TrajectoryPool(object):
+    """
+    define an object to store trajectories
+    """
+    def __init__(self, max_trajectories=100):
+        self.states_list = []
+        self.move_actions_list = []
+        self.release_actions_list = []
+        self.rewards_list = []
+        self.minimum_rewards = -1e-10
+        self.minimum_idx = None
+        self.maximum_rewards = 1e-10
+        self.maximum_idx = None
+        self.max_trajectories = max_trajectories
+        self.num_trajectories = 0
+
+    def _add_trj(self, states, move_actions, release_actions, rewards):
+        self.states_list.append(states)
+        self.move_actions_list.append(move_actions)
+        self.release_actions_list.append(release_actions)
+        self.rewards_list.append(rewards)
+        self.num_trajectories += 1
+
+    def add_good_trj(self, states, move_actions, release_actions, rewards):
+        if rewards[-1] > self.maximum_rewards:
+            pass
 
 
