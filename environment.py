@@ -44,6 +44,9 @@ class Env2D(object):
         self.ext_action_cmbs = np.hstack((np.zeros((len(self.action_combinations), self.state_dimension)),
                                           self.action_combinations))
 
+        self.state_action_idxes = [4, 5, 10, 11, 16, 17]
+        self.state_idxes = [4, 5, 10, 11]
+
         # ball information
         self.gravity = -10.0
 

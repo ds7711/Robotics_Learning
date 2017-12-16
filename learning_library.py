@@ -3,6 +3,7 @@ import kinematics_library as knl
 from keras.models import Sequential
 from keras.layers import Dense, Activation
 from keras import regularizers
+import pdb
 import copy
 
 
@@ -55,7 +56,9 @@ def shaping_training(env):
 
         # test that exploiter could reliably do the current best behavior and record the data
 
-        # increase the reward threshold for next training iteration
+        # if not, continue exploring to collect more data
+
+        # if yes, increase the reward threshold for next training iteration
         reward_threshold /= threshold_increase
 
         pass
@@ -158,6 +161,8 @@ class PolicyObject(object):
         self.state_dimension = env.state_dimension
         self.gravity = env.gravity
         self.max_time = env.max_time
+        self.state_idxes = env.state_idxes
+        self.state_action_idxes = env.state_action_idxes
 
         # epsilon
         # self.exploit_epislon = exploit_epislon
@@ -182,13 +187,13 @@ class PolicyObject(object):
         :param release_epislon:
         :return:
         """
-
+        release_norm = 5.0e-4  # controls the least probability to release the ball
         self.ext_action_cmbs[:, :self.state_dimension] = state
-        ext_cmbs_2d = self.ext_action_cmbs[:, [4, 5, 10, 11, 16, 17]]
+        ext_cmbs_2d = self.ext_action_cmbs[:, self.state_action_idxes]
 
         mover_q_values = self.mover_q.predict(ext_cmbs_2d)
         releaser_q_values = np.squeeze(self.releaser_q.predict(state[np.newaxis,
-                                                                     [4, 5, 10, 11]]))
+                                                                     self.state_idxes]))
         if np.random.rand() < move_epislon:
             act_idx = np.argmax(mover_q_values)
             move_action = self.action_cmbs[act_idx]
@@ -200,9 +205,11 @@ class PolicyObject(object):
         release_probability = (releaser_q_values + 1) / 2.0
         if release_probability > release_epislon:
             release_action = 1
+        elif release_probability < 1 - release_epislon:  # when confidence is low, don't throw the ball
+            release_action = np.random.rand() < release_norm
         else:
             # release_action = np.random.rand() < (release_probability + 1 - release_epislon)
-            release_action = np.random.rand() < (1 - release_epislon)
+            release_action = np.random.rand() < release_probability - (1 - release_epislon) + release_norm
         return(move_action, release_action)
 
     def random_explorer(self, ra, num_movements, threshold):
@@ -427,38 +434,163 @@ class PolicyObject(object):
                 np.asarray(reward_list))
 
 
-def trj2data(states, move_actions, release_actions, rewards, mover_q, releaser_q, discounting_factor):
-    # calculate the data for training the releaser
-
-    # calculate the data for training the mover
-    pass
-
-
 class TrajectoryPool(object):
     """
     define an object to store trajectories
     """
-    def __init__(self, max_trajectories=100):
+    def __init__(self, max_trajectories=1e8, env=None):
+        """
+        initialize the data pool for storing data
+        :param max_trajectories:
+        :param env:
+        """
         self.states_list = []
         self.move_actions_list = []
         self.release_actions_list = []
         self.rewards_list = []
-        self.minimum_rewards = -1e-10
-        self.minimum_idx = None
-        self.maximum_rewards = 1e-10
-        self.maximum_idx = None
         self.max_trajectories = max_trajectories
         self.num_trajectories = 0
+        self.good_idxes = []
+        self.bad_idxes = []
+        self.netral_idxes = []
+        self.trj_sep_bd = [0, 0]
+
+        self.state_idxes = env.state_idxes
+        self.state_action_idxes = env.state_action_idxes
 
     def _add_trj(self, states, move_actions, release_actions, rewards):
+        """
+        add trajectories to the data pool
+        :param states:
+        :param move_actions:
+        :param release_actions:
+        :param rewards:
+        :return:
+        """
         self.states_list.append(states)
         self.move_actions_list.append(move_actions)
         self.release_actions_list.append(release_actions)
         self.rewards_list.append(rewards)
-        self.num_trajectories += 1
 
-    def add_good_trj(self, states, move_actions, release_actions, rewards):
-        if rewards[-1] > self.maximum_rewards:
-            pass
+    def add_trj(self, states, move_actions, release_actions, rewards):
+        if self.num_trajectories < self.max_trajectories:
+            self._add_trj(states, move_actions, release_actions, rewards)
+
+            if rewards[-1] > self.trj_sep_bd[1]:
+                self.good_idxes.append(copy.copy(self.num_trajectories))
+            elif rewards[-1] < self.trj_sep_bd[0]:
+                self.bad_idxes.append(copy.copy(self.num_trajectories))
+            else:
+                self.netral_idxes.append(copy.copy(self.num_trajectories))
+            self.num_trajectories += 1
+
+        else:
+            print("No capacity left!")
+            pdb.set_trace()
+
+    def _good_bad_ratio(self):
+        """
+        calculate the relative ratio of good and bad examples
+        :return:
+        """
+        num_bad = len(self.bad_idxes)
+        num_good = len(self.good_idxes)
+        if num_bad > num_good:
+            ratio = int(num_bad / num_good + 0.5)
+            return(ratio, 1)
+        else:
+            ratio = int(num_good / num_bad)
+            return(1, ratio)
+
+    @staticmethod
+    def _propogate_rewards(rewards, discounting):
+        """
+        propagate the rewards to the previous steps
+        :param rewards:
+        :param discounting:
+        :return:
+        """
+        num_rewards = len(rewards)
+        new_rewards = np.copy(rewards)
+        for iii in range(0, num_rewards-1):
+            new_rewards[num_rewards-iii-2] = new_rewards[num_rewards-iii-1] * discounting
+        return(new_rewards)
+
+    def update(self, mover_q=None, reward_threshold=None, trj_sep_bd=None, discounting=1.0):
+        pass
+
+    def data4release_agent(self):
+        X = []
+        Y = []
+        for iii in range(self.num_trajectories):
+            tmp_state = self.states_list[iii][-1]
+            tmp_reward = self.rewards_list[iii][-1]
+            X.append(tmp_state)
+            Y.append(tmp_reward)
+        X = np.asarray(X)
+        Y = np.asarray(Y)
+        good_X = X[self.good_idxes, :]
+        good_X = good_X[:, self.state_idxes]
+        good_Y = Y[self.good_idxes]
+
+        bad_X = X[self.bad_idxes, :]
+        bad_X = bad_X[:, self.state_idxes]
+        bad_Y = Y[self.bad_idxes]
+
+        neutral_X = X[self.netral_idxes, :]
+        neutral_X = neutral_X[:, self.state_idxes]
+        neutral_Y = Y[self.netral_idxes]
+
+        num_good, num_bad = self._good_bad_ratio()
+        if num_good > 1:
+            good_X = np.vstack([good_X for _ in range(num_good)])
+            good_Y = np.concatenate([good_Y for _ in range(num_bad)])
+        if num_bad > 1:
+            bad_X = np.vstack([bad_X for _ in range(num_good)])
+            bad_Y = np.concatenate([bad_Y for _ in range(num_bad)])
+
+        X = np.vstack((good_X, bad_X, neutral_X))
+        Y = np.concatenate((good_Y, bad_Y, neutral_Y))
+
+        return(X, Y)
+
+    def _combine_trj(self, idxes, discounting):
+        states_list = []
+        actions_list = []
+        Y = []
+        for iii in idxes:
+            tmp_states = self.states_list[iii][:-1]
+            tmp_actions = self.move_actions_list[iii][:-1]
+            states_list.append(tmp_states)
+            actions_list.append(tmp_actions)
+            tmp_rewards = self.rewards_list[iii]
+            tmp_rewards = self._propogate_rewards(tmp_rewards, discounting)
+            Y.append(tmp_rewards[1:])
+        states_list = np.vstack(states_list)
+        actions_list = np.vstack(actions_list)
+        X = np.hstack((states_list, actions_list))
+        Y = np.concatenate(Y)
+        return(X[:, self.state_action_idxes], Y)
+
+    def data4move_agent(self, discounting):
+        good_X, good_Y = self._combine_trj(self.good_idxes, discounting)
+        bad_X, bad_Y = self._combine_trj(self.bad_idxes, discounting)
+        neutral_X, neutral_Y = self._combine_trj(self.netral_idxes, discounting)
+
+        num_good, num_bad = self._good_bad_ratio()
+        if num_good > 1:
+            good_X = np.vstack([good_X for _ in range(num_good)])
+            good_Y = np.concatenate([good_Y for _ in range(num_bad)])
+        if num_bad > 1:
+            bad_X = np.vstack([bad_X for _ in range(num_good)])
+            bad_Y = np.concatenate([bad_Y for _ in range(num_bad)])
+
+        X = np.vstack((good_X, bad_X, neutral_X))
+        Y = np.concatenate((good_Y, bad_Y, neutral_Y))
+
+        return(X, Y)
+
+
+
 
 

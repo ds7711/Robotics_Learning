@@ -7,6 +7,16 @@ import copy
 import pdb
 
 
+# 7. debug for the TrajectoryPool
+
+
+# 6. debug _propagate_rewards in TrajectoryPool
+rewards = np.zeros(10)
+rewards[-1] = -0.9
+
+new_rewards = lnl.TrajectoryPool._propogate_rewards(rewards, 0.9)
+
+
 # 5. debug for the policy object
 # debug the epislon greedy policy
 env = environment.Env2D()
