@@ -124,38 +124,45 @@ def reward_function(pos, vel, threshold, target_pos, gravity):
     """
     alpha = threshold
     beta = threshold
+    # alpha = 1
+    # beta = 1
     dist2t = knl.ball2hoop(pos, vel, target_pos, gravity)
 
     if dist2t < threshold:
-        reward = alpha / (alpha + dist2t) - 0.5
-        return(reward * 2.0)
+        reward = (alpha / (alpha + dist2t) - 0.5) * 2.0
+        # if reward > 0.9:
+        #     pdb.set_trace()
+        return(reward, dist2t)
 
     else:
-        reward = beta / (beta + dist2t) - 0.5
-        return(reward * 2.0)
+        reward = (beta / (beta + dist2t) - 0.5) * 2.0
+        return(reward, dist2t)
 
 
 class PolicyObject(object):
 
     def __init__(self, move_agent, release_agent,
-                 env):
+                 env, mover_q_ub=0):
         """
         initialize policy object
         :param move_agent:
         :param release_agent:
         :param env:
+        :param mover_q_ub: q values higher than the upper bound shouldn't be trusted
         """
 
         # action spaces
         # self.env = env
-        self.action_cmbs = env.action_combinations
-        self.ext_action_cmbs = env.ext_action_cmbs
-        self.action_idxes = env.action_idxes
+        self.action_cmbs = np.copy(env.action_combinations)
+        self.ext_action_cmbs = np.copy(env.ext_action_cmbs)
+        self.action_idxes = np.copy(env.action_idxes)
 
         # mover and releaser
         self.mover_q = move_agent
         self.releaser_q = release_agent
         self.hoop_position = env.hoop_position
+        self.max_score_dist = env.dist_threshold
+        self.mover_q_ub = mover_q_ub
 
         # state dimension
         self.state_dimension = env.state_dimension
@@ -164,9 +171,48 @@ class PolicyObject(object):
         self.state_idxes = env.state_idxes
         self.state_action_idxes = env.state_action_idxes
 
-        # epsilon
-        # self.exploit_epislon = exploit_epislon
-        # self.explore_epislon = explore_epislon
+    def test_move_q(self, ra, move_action_list, release_action_list, threshold):
+        """
+        test the goodness of the current model
+        :param ra:
+        :param move_action_list:
+        :param release_action_list:
+        :param threshold:
+        :return:
+        """
+        state_list = [np.copy(ra.state)]
+        reward_list = []
+        score = 0
+        for iii in range(len(release_action_list)):
+            move_action = move_action_list[iii]
+            release_action = release_action_list[iii]
+            ra.update(move_action, release_action)
+            state_list.append(np.copy(ra.state))
+            if ra.release:
+                pos = ra.loc_joints()[-1][:-1]
+                vel = ra.cal_ee_speed()[:-1]
+                reward, dist2t = reward_function(pos, vel, threshold, self.hoop_position, self.gravity)
+                score = dist2t < self.max_score_dist
+            else:
+                reward = 0
+            reward_list.append(reward)
+        x = np.hstack((state_list[:-1], move_action_list))[:-1, :]
+        x = x[:, self.state_action_idxes]
+        q_vals = self.mover_q.predict(normalize_x(x))
+        return(np.asarray(state_list), np.squeeze(q_vals), np.asarray(reward_list), score)
+
+    def test_release_q(self, ra, final_state_list, threshold):
+        reward_list = []
+        final_state_list = np.asarray(final_state_list)
+        final_state_list = normalize_x(final_state_list)
+        for state in final_state_list:
+            ra.joint_angles = state[:self.state_dimension]
+            ra.angular_velocities = state[self.state_dimension:]
+            pos, vel = ra.loc_joints()[-1][:-1], ra.cal_ee_speed()[:-1]
+            reward, dist2t = reward_function(pos, vel, threshold, self.hoop_position, self.gravity)
+            reward_list.append(reward)
+        release_q_vals = np.squeeze(self.releaser_q.predict(final_state_list[:, self.state_idxes]))
+        return(np.asarray(reward_list), release_q_vals)
 
     def _random_move(self, release_epislon):
         """
@@ -177,7 +223,7 @@ class PolicyObject(object):
         rdx = np.random.choice(self.action_idxes)  # randomly choose a move action
         move_action = self.action_cmbs[rdx]
         release_action = np.random.rand() > release_epislon
-        return (move_action, release_action)
+        return (np.copy(move_action), release_action)
 
     def _epsilon_greedy_action(self, state, move_epislon, release_epislon):
         """
@@ -187,37 +233,39 @@ class PolicyObject(object):
         :param release_epislon:
         :return:
         """
-        release_norm = 5.0e-4  # controls the least probability to release the ball
         self.ext_action_cmbs[:, :self.state_dimension] = state
         ext_cmbs_2d = self.ext_action_cmbs[:, self.state_action_idxes]
 
-        mover_q_values = self.mover_q.predict(ext_cmbs_2d)
-        releaser_q_values = np.squeeze(self.releaser_q.predict(state[np.newaxis,
-                                                                     self.state_idxes]))
+        mover_q_values = self.mover_q.predict(normalize_x(ext_cmbs_2d))
+        releaser_q_values = np.squeeze(self.releaser_q.predict(normalize_x(state[np.newaxis,
+                                                                           self.state_idxes])))
+        # pdb.set_trace()
         if np.random.rand() < move_epislon:
+            if np.random.randn() < move_epislon:
+                # if predicted q values from nn is larger than the biggest q values from the training data, discard it
+                mover_q_values[mover_q_values > self.mover_q_ub] = 0
             act_idx = np.argmax(mover_q_values)
             move_action = self.action_cmbs[act_idx]
         else:
             act_idx = np.random.choice(self.action_idxes)
             move_action = self.action_cmbs[act_idx]
-        # release the ball only if one is really certain, otherwise, release the ball based on the confidence.
-        # minimum releasing probability is 20%.
+
         release_probability = (releaser_q_values + 1) / 2.0
         if release_probability > release_epislon:
             release_action = 1
-        elif release_probability < 1 - release_epislon:  # when confidence is low, don't throw the ball
-            release_action = np.random.rand() < release_norm
-        else:
-            # release_action = np.random.rand() < (release_probability + 1 - release_epislon)
-            release_action = np.random.rand() < release_probability - (1 - release_epislon) + release_norm
-        return(move_action, release_action)
+        # elif release_probability < 0.5:
+        #     release_action = np.random.rand() < 1e-2
+        else:  # when confidence is low, don't throw the ball
+            release_action = np.random.rand() < release_probability / 20
+        return(np.copy(move_action), release_action)
 
-    def random_explorer(self, ra, num_movements, threshold):
+    def random_explorer(self, ra, num_movements, threshold, noise):
         """
         select actions randomly
         :param ra:
         :param num_movements: select the number of movements before releasing the ball
         :param threshold:
+        :param noise:
         :return:
         """
 
@@ -231,6 +279,7 @@ class PolicyObject(object):
         release_action_lsit = np.zeros(num_movements)
         release_action_lsit[-1] = 1
         reward_list = []
+        score = 0
 
         for release_action in release_action_lsit:
             # return reward based on whether the ball was released
@@ -240,7 +289,7 @@ class PolicyObject(object):
                 move_action, _ = self._random_move(2)  # set release_epislon to be bigger than 1 so that no release
 
                 # add some noise to the data so no repeated trajectories
-                added_noise = np.random.randn(len(move_action)) * np.abs(move_action) * 0.3
+                added_noise = np.random.randn(len(move_action)) * np.abs(move_action) * noise
                 move_action += added_noise
                 # store the action
                 move_action_list.append(move_action)
@@ -252,15 +301,15 @@ class PolicyObject(object):
             else:
                 ee_pos = ra.loc_joints()[-1][:-1]
                 ee_speed = ra.cal_ee_speed()[:-1]
-                reward = reward_function(ee_pos, ee_speed, threshold, hoop_position, gravity)
-
+                reward, dist2t = reward_function(ee_pos, ee_speed, threshold, hoop_position, gravity)
+                score = dist2t < self.max_score_dist
                 move_action = np.zeros(self.action_cmbs.shape[1])
                 move_action_list.append(move_action)  # add a action selected at the last state
             reward_list.append(reward)
 
         return (np.asarray(state_list), np.asarray(move_action_list),
                 release_action_lsit,
-                np.asarray(reward_list))
+                np.asarray(reward_list), score)
 
     def epsilon_greedy_trajectory(self, ra, move_epislon, release_epislon, threshold):
         """
@@ -276,6 +325,7 @@ class PolicyObject(object):
         move_action_list = []
         release_action_lsit = []
         reward_list = []
+        score = 0
 
         while (not ra.release) and ra.time < self.max_time:
             # get the action randomly, never select release until number of movements were tried
@@ -295,8 +345,9 @@ class PolicyObject(object):
                 # return reward based on whether the ball was released
                 ee_pos = ra.loc_joints()[-1][:-1]
                 ee_speed = ra.cal_ee_speed()[:-1]
-                reward = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
-                                         self.gravity)
+                reward, dist2t = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
+                                                 self.gravity)
+                score = dist2t < self.max_score_dist
                 move_action = np.zeros(self.action_cmbs.shape[1])
                 move_action_list.append(move_action)
                 ra.release = True  # update the ra state to break the loop
@@ -309,15 +360,15 @@ class PolicyObject(object):
             move_action, release_action = np.zeros(self.action_cmbs.shape[1]), 1
             ee_pos = ra.loc_joints()[-1][:-1]
             ee_speed = ra.cal_ee_speed()[:-1]
-            reward = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
-                                     self.gravity)
+            reward, score = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
+                                            self.gravity)
             move_action_list.append(move_action)
             release_action_lsit.append(release_action)
             reward_list.append(reward)
 
         return (np.asarray(state_list), np.asarray(move_action_list),
                 np.asarray(release_action_lsit),
-                np.asarray(reward_list))
+                np.asarray(reward_list), score)
 
     def power_exploring_trajectory(self, ra, move_epislon, release_epislon, threshold, noise):
         """
@@ -334,12 +385,12 @@ class PolicyObject(object):
         move_action_list = []
         release_action_lsit = []
         reward_list = []
-
+        score = 0
+        # pdb.set_trace()
         while (not ra.release) and ra.time < self.max_time:
             # get the action randomly, never select release until number of movements were tried
             move_action, release_action = self._epsilon_greedy_action(ra.state, move_epislon,
                                                                       release_epislon)
-
             if not release_action:
                 # add noise to the actions
                 added_noise = np.random.randn(self.action_cmbs.shape[1]) * noise * np.abs(move_action)
@@ -356,8 +407,9 @@ class PolicyObject(object):
                 # return reward based on where the ball was released
                 ee_pos = ra.loc_joints()[-1][:-1]
                 ee_speed = ra.cal_ee_speed()[:-1]
-                reward = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
+                reward, dist2t = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
                                          self.gravity)
+                score = dist2t < self.max_score_dist
                 move_action = np.zeros(self.action_cmbs.shape[1])
                 move_action_list.append(move_action)
                 ra.release = True  # release the ball
@@ -370,17 +422,17 @@ class PolicyObject(object):
             move_action, release_action = np.zeros(self.action_cmbs.shape[1]), 1
             ee_pos = ra.loc_joints()[-1][:-1]
             ee_speed = ra.cal_ee_speed()[:-1]
-            reward = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
-                                     self.gravity)
+            reward, score = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
+                                            self.gravity)
             move_action_list.append(move_action)
             release_action_lsit.append(release_action)
             reward_list.append(reward)
 
         return (np.asarray(state_list), np.asarray(move_action_list),
                 np.asarray(release_action_lsit),
-                np.asarray(reward_list))
+                np.asarray(reward_list), score)
 
-    def greedy_plus_random_explorer(self, ra, move_epislon, release_epislon, threshold):
+    def greedy_plus_random_explorer(self, ra, move_epislon, release_epislon, threshold, noise):
         """
         create new trajectories by extending beyond current best policies
         :param ra:
@@ -390,13 +442,14 @@ class PolicyObject(object):
         :return:
         """
 
-        states0, move_actions0, release_actions0, rewards0 = self.epsilon_greedy_trajectory(ra, move_epislon,
-                                                                                            release_epislon,
-                                                                                            threshold)
+        states0, move_actions0, release_actions0, rewards0, _ = self.epsilon_greedy_trajectory(ra, move_epislon,
+                                                                                               release_epislon,
+                                                                                               threshold)
         # release_actions0[-1] = 0
         num_extra_movements = np.random.randint(2, len(states0)+2)
         ra.release = 0
-        states1, move_actions1, release_actions1, rewards1 = self.random_explorer(ra, num_extra_movements, threshold)
+        states1, move_actions1, release_actions1, rewards1, score = self.random_explorer(ra, num_extra_movements,
+                                                                                         threshold, noise)
         state_list = np.vstack((states0[:-1], states1))
         move_action_list = np.vstack((move_actions0[:-1], move_actions1))
         release_action_list = np.concatenate((release_actions0[:-1], release_actions1))
@@ -404,7 +457,7 @@ class PolicyObject(object):
 
         return (np.asarray(state_list), np.asarray(move_action_list),
                 np.asarray(release_action_list),
-                np.asarray(reward_list))
+                np.asarray(reward_list), score)
 
     def power_plus_random_explorer(self, ra, move_epislon, release_epislon, threshold, noise):
         """
@@ -417,13 +470,14 @@ class PolicyObject(object):
         :return:
         """
 
-        states0, move_actions0, release_actions0, rewards0 = self.power_exploring_trajectory(ra, move_epislon,
-                                                                                             release_epislon,
-                                                                                             threshold, noise)
+        states0, move_actions0, release_actions0, rewards0, _ = self.power_exploring_trajectory(ra, move_epislon,
+                                                                                                release_epislon,
+                                                                                                threshold, noise)
         # release_actions0[-1] = 0
         num_extra_movements = np.random.randint(2, len(states0)+2)
         ra.release = 0
-        states1, move_actions1, release_actions1, rewards1 = self.random_explorer(ra, num_extra_movements, threshold)
+        states1, move_actions1, release_actions1, rewards1, score = self.random_explorer(ra, num_extra_movements,
+                                                                                         threshold, noise)
         state_list = np.vstack((states0[:-1], states1))
         move_action_list = np.vstack((move_actions0[:-1], move_actions1))
         release_action_list = np.concatenate((release_actions0[:-1], release_actions1))
@@ -431,7 +485,7 @@ class PolicyObject(object):
 
         return (np.asarray(state_list), np.asarray(move_action_list),
                 np.asarray(release_action_list),
-                np.asarray(reward_list))
+                np.asarray(reward_list), score)
 
 
 class TrajectoryPool(object):
@@ -448,12 +502,14 @@ class TrajectoryPool(object):
         self.move_actions_list = []
         self.release_actions_list = []
         self.rewards_list = []
+        self.final_rewards = []
         self.max_trajectories = max_trajectories
         self.num_trajectories = 0
         self.good_idxes = []
         self.bad_idxes = []
         self.netral_idxes = []
         self.trj_sep_bd = [0, 0]
+        self.final_state_list = []
 
         self.state_idxes = env.state_idxes
         self.state_action_idxes = env.state_action_idxes
@@ -471,6 +527,8 @@ class TrajectoryPool(object):
         self.move_actions_list.append(move_actions)
         self.release_actions_list.append(release_actions)
         self.rewards_list.append(rewards)
+        self.final_rewards.append(rewards[-1])
+        self.final_state_list.append(states[-1])
 
     def add_trj(self, states, move_actions, release_actions, rewards):
         if self.num_trajectories < self.max_trajectories:
@@ -520,15 +578,8 @@ class TrajectoryPool(object):
         pass
 
     def data4release_agent(self):
-        X = []
-        Y = []
-        for iii in range(self.num_trajectories):
-            tmp_state = self.states_list[iii][-1]
-            tmp_reward = self.rewards_list[iii][-1]
-            X.append(tmp_state)
-            Y.append(tmp_reward)
-        X = np.asarray(X)
-        Y = np.asarray(Y)
+        X = np.asarray(self.final_state_list)
+        Y = np.asarray(self.final_rewards)
         good_X = X[self.good_idxes, :]
         good_X = good_X[:, self.state_idxes]
         good_Y = Y[self.good_idxes]
@@ -544,32 +595,37 @@ class TrajectoryPool(object):
         num_good, num_bad = self._good_bad_ratio()
         if num_good > 1:
             good_X = np.vstack([good_X for _ in range(num_good)])
-            good_Y = np.concatenate([good_Y for _ in range(num_bad)])
+            good_Y = np.concatenate([good_Y for _ in range(num_good)])
         if num_bad > 1:
-            bad_X = np.vstack([bad_X for _ in range(num_good)])
+            bad_X = np.vstack([bad_X for _ in range(num_bad)])
             bad_Y = np.concatenate([bad_Y for _ in range(num_bad)])
 
         X = np.vstack((good_X, bad_X, neutral_X))
+        X = normalize_x(X)
         Y = np.concatenate((good_Y, bad_Y, neutral_Y))
 
         return(X, Y)
 
     def _combine_trj(self, idxes, discounting):
-        states_list = []
-        actions_list = []
-        Y = []
-        for iii in idxes:
-            tmp_states = self.states_list[iii][:-1]
-            tmp_actions = self.move_actions_list[iii][:-1]
-            states_list.append(tmp_states)
-            actions_list.append(tmp_actions)
-            tmp_rewards = self.rewards_list[iii]
-            tmp_rewards = self._propogate_rewards(tmp_rewards, discounting)
-            Y.append(tmp_rewards[1:])
-        states_list = np.vstack(states_list)
-        actions_list = np.vstack(actions_list)
-        X = np.hstack((states_list, actions_list))
-        Y = np.concatenate(Y)
+        if len(idxes) == 0:
+            X = np.empty((0, len(self.state_action_idxes)))
+            Y = np.empty((0))
+        else:
+            states_list = []
+            actions_list = []
+            Y = []
+            for iii in idxes:
+                tmp_states = self.states_list[iii][:-1]
+                tmp_actions = self.move_actions_list[iii][:-1]
+                states_list.append(tmp_states)
+                actions_list.append(tmp_actions)
+                tmp_rewards = self.rewards_list[iii]
+                tmp_rewards = self._propogate_rewards(tmp_rewards, discounting)
+                Y.append(tmp_rewards[1:])
+            states_list = np.vstack(states_list)
+            actions_list = np.vstack(actions_list)
+            X = np.hstack((states_list, actions_list))
+            Y = np.concatenate(Y)
         return(X[:, self.state_action_idxes], Y)
 
     def data4move_agent(self, discounting):
@@ -580,17 +636,23 @@ class TrajectoryPool(object):
         num_good, num_bad = self._good_bad_ratio()
         if num_good > 1:
             good_X = np.vstack([good_X for _ in range(num_good)])
-            good_Y = np.concatenate([good_Y for _ in range(num_bad)])
+            good_Y = np.concatenate([good_Y for _ in range(num_good)])
         if num_bad > 1:
-            bad_X = np.vstack([bad_X for _ in range(num_good)])
+            bad_X = np.vstack([bad_X for _ in range(num_bad)])
             bad_Y = np.concatenate([bad_Y for _ in range(num_bad)])
 
         X = np.vstack((good_X, bad_X, neutral_X))
+        X = normalize_x(X)
         Y = np.concatenate((good_Y, bad_Y, neutral_Y))
 
         return(X, Y)
 
 
-
+def normalize_x(old_x, time_step=1e-3):
+    signs = np.sign(old_x)
+    abs_x = np.abs(old_x) / time_step
+    log_x = np.log(1.0 + abs_x)
+    x = signs * log_x
+    return(x)
 
 

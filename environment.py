@@ -22,7 +22,7 @@ class Env2D(object):
         self.ini_ee_pos = self.ini_ra.loc_joints()[-1][:-1]
 
         # configuration for the hoop
-        self.hoop_position = np.asarray([7.5, 3, 0.7], dtype=np.double)  # hoop position
+        self.hoop_position = np.asarray([4.72, 3, 0.5], dtype=np.double)  # hoop position
         self.dist_threshold = 1.0 / 2  # fixed to check the performance
 
         # distance between the initial ee position and hoop position
@@ -30,8 +30,9 @@ class Env2D(object):
 
         # specify the action spaces of the acceleration
         self.speed_norm_factor = 10.0e-3
-        self.num_speeds = 40 / 2
-        self.speed_range = list(np.linspace(-1, 0, self.num_speeds)[:-1]) + list(np.linspace(0, 1, self.num_speeds))
+        self.num_speeds = 20 / 2
+        # self.speed_range = list(np.linspace(-1, 0, self.num_speeds)[:-1]) + list(np.linspace(0, 1, self.num_speeds))
+        self.speed_range = [-1.5, -1.0, -0.5, -0.1, 0, 0.1, 0.5, 1.0, 1.5]
         self.speed_range = np.asarray(self.speed_range) / self.speed_norm_factor
         self.action_spaces = [[0]] * self.num_fixed_joints + \
                              [list(self.speed_range)] * (self.num_joints-self.num_fixed_joints)
