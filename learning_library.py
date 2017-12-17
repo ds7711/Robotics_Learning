@@ -68,7 +68,7 @@ def shaping_training(env):
     pass
 
 
-def get_move_agent(units_list, common_activation_func="relu", regularization=regularizers.l2(0.1)):
+def get_move_agent(units_list, common_activation_func="tanh", regularization=regularizers.l2(0.1)):
     """
     create a neural network model based on the units_list
     :param units_list: list of integers that specify the number of units in each layer
@@ -86,11 +86,11 @@ def get_move_agent(units_list, common_activation_func="relu", regularization=reg
         model.add(Activation(common_activation_func))
     model.add(Dense(units_list[-1], kernel_regularizer=regularization))
     model.add(Activation("tanh"))
-    model.compile(loss="mean_squared_error", optimizer="adam")
+    model.compile(loss="mean_squared_error", optimizer="sgd")
     return(model)
 
 
-def get_release_agent(units_list, common_activation_func="relu", regularization=regularizers.l2(0.1)):
+def get_release_agent(units_list, common_activation_func="tanh", regularization=regularizers.l2(0.1)):
     """
     create a neural network object for classification
     :param units_list:
@@ -107,7 +107,7 @@ def get_release_agent(units_list, common_activation_func="relu", regularization=
         model.add(Activation(common_activation_func))
     model.add(Dense(units_list[-1], kernel_regularizer=regularization))
     model.add(Activation("tanh"))
-    model.compile(loss="mean_squared_error", optimizer="adam")
+    model.compile(loss="mean_squared_error", optimizer="sgd")
     return(model)
 
 
@@ -600,9 +600,10 @@ class TrajectoryPool(object):
             bad_X = np.vstack([bad_X for _ in range(num_bad)])
             bad_Y = np.concatenate([bad_Y for _ in range(num_bad)])
 
-        X = np.vstack((good_X, bad_X, neutral_X))
-        X = normalize_x(X)
-        Y = np.concatenate((good_Y, bad_Y, neutral_Y))
+        raw_X = np.vstack((good_X, bad_X, neutral_X))
+        X = normalize_x(raw_X)
+        raw_Y = np.concatenate((good_Y, bad_Y, neutral_Y))
+        Y = normolize_y(raw_Y)
 
         return(X, Y)
 
@@ -641,9 +642,10 @@ class TrajectoryPool(object):
             bad_X = np.vstack([bad_X for _ in range(num_bad)])
             bad_Y = np.concatenate([bad_Y for _ in range(num_bad)])
 
-        X = np.vstack((good_X, bad_X, neutral_X))
-        X = normalize_x(X)
-        Y = np.concatenate((good_Y, bad_Y, neutral_Y))
+        raw_X = np.vstack((good_X, bad_X, neutral_X))
+        X = normalize_x(raw_X)
+        raw_Y = np.concatenate((good_Y, bad_Y, neutral_Y))
+        Y = normolize_y(raw_Y)
 
         return(X, Y)
 
@@ -655,4 +657,30 @@ def normalize_x(old_x, time_step=1e-3):
     x = signs * log_x
     return(x)
 
+
+def normolize_y(old_y):
+    avg = np.mean(np.abs(old_y))
+    new_y = old_y / avg
+    new_y = np.clip(new_y, -1.0, 1.0)
+    # return(old_y)
+    return(new_y)
+
+
+def training2converge(agent, x, y, batch_size=10000, epochs=100, count_threshold=1, verbose=0):
+    training_flag = True
+    minimum_val_lost = np.inf
+    count = 0
+    while training_flag:
+        ra_hist = agent.fit(x, y[:, np.newaxis], batch_size=batch_size, epochs=epochs,
+                            validation_split=0.3, verbose=verbose)
+        val_loss = np.mean(ra_hist.history["val_loss"])
+        print("%f......." % val_loss),
+        if val_loss < minimum_val_lost:
+            minimum_val_lost = val_loss
+        else:
+            count += 1
+        if count >= count_threshold:
+            training_flag = False
+            print("Training completed! Validation loss stopped decreasing. ")
+    return(agent)
 

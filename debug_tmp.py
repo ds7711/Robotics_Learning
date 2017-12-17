@@ -11,8 +11,8 @@ import IPython
 # initialize objects
 env = environment.Env2D()
 ra = copy.deepcopy(env.ini_ra)
-release_agent = lnl.get_release_agent([4, 30, 10, 1])
-move_agent = lnl.get_move_agent([6, 50, 20, 1])
+release_agent = lnl.get_release_agent([4, 100, 50, 25, 1])
+move_agent = lnl.get_move_agent([6, 650, 250, 125, 1])
 policy = lnl.PolicyObject(move_agent, release_agent, env)
 
 
@@ -20,7 +20,7 @@ policy = lnl.PolicyObject(move_agent, release_agent, env)
 threshold = env.ee2hoop - 0.5
 trj_pool = lnl.TrajectoryPool(max_trajectories=100000, env=env)
 score_list = []
-# pdb.set_trace()
+
 print(env.action_combinations)
 for iii in range(10000):
     ra = copy.deepcopy(env.ini_ra)
@@ -33,38 +33,57 @@ for iii in range(10000):
 final_rewards = np.asarray(trj_pool.final_rewards)
 pos_rewards = final_rewards[final_rewards > 0]
 
-# find actions that should give positive reward
-move_actions_list_bk = np.asarray(trj_pool.move_actions_list)
-release_actions_list_bk = np.asarray(trj_pool.release_actions_list)
-# idx_list = []
-# for iii in range(len(move_actions_list_bk)):
-#     tmp_actions = move_actions_list_bk[iii][:-1]
-#     if np.sum(tmp_actions[:, -2] > 10) > 2 and np.sum(tmp_actions[:, -1] > 10) > 2:
-#         idx_list.append(iii)
-idx = np.argmax(final_rewards)
-move_actions = move_actions_list_bk[idx]
-release_actions = release_actions_list_bk[idx]
-ra = copy.deepcopy(env.ini_ra)
-
-
-a, b, c, d = policy.test_move_q(ra, move_actions, release_actions, threshold)
-
+# get good & bad examples and see the predictions from fitted model
 release_x, release_y = trj_pool.data4release_agent()
 move_x, move_y = trj_pool.data4move_agent(0.9)
 
-a, b = release_agent.layers[0].get_weights()
-a, b = np.copy(a), np.copy(b)
-
-ra_hist = release_agent.fit(release_x, release_y[:, np.newaxis], batch_size=10000, epochs=500, validation_split=0.2)
-ma_hist = move_agent.fit(move_x, move_y[:, np.newaxis], batch_size=10000, epochs=100, validation_split=0.2)
-
-c, d = policy.releaser_q.layers[0].get_weights()
-
-tmp = pos_rewards
-mover_q_ub = np.mean(tmp)
-releaser_q_avg = np.mean(tmp)
+# test predictions before training
+good_release_idx = release_y >= 0
+bad_release_idx = np.logical_not(good_release_idx)
+good_release_x, bad_release_x = release_x[good_release_idx, :], release_x[bad_release_idx, :]
+good_release_y, bad_release_y = release_y[good_release_idx], release_y[bad_release_idx]
+# see predictions from releaser_q
+est_good_release_y = policy.releaser_q.predict(good_release_x)
+est_bad_release_y = policy.releaser_q.predict(bad_release_x)
+print(np.mean(est_bad_release_y < 0), np.mean(est_good_release_y > 0))
 
 
+good_move_idx = move_y >= 0
+bad_move_idx = np.logical_not(good_move_idx)
+good_move_x, good_move_y = move_x[good_move_idx, :], move_y[good_move_idx]
+bad_move_x, bad_move_y = move_x[bad_move_idx, :], move_y[bad_move_idx]
+est_good_move_y = policy.mover_q.predict(good_move_x)
+est_bad_move_y = policy.mover_q.predict(bad_move_x)
+print(np.mean(est_bad_move_y < 0), np.mean(est_good_move_y > 0))
+
+pdb.set_trace()
+# fit the model
+fitted_release_agent = lnl.training2converge(release_agent, release_x, release_y, batch_size=10000,
+                                             epochs=100, verbose=0)
+fitted_move_agent = lnl.training2converge(move_agent, move_x, move_y, batch_size=10000, epochs=20, verbose=0)
+
+
+# find good release examples, # test the prediction accuracy
+good_release_idx = release_y >= 0
+bad_release_idx = np.logical_not(good_release_idx)
+good_release_x, bad_release_x = release_x[good_release_idx, :], release_x[bad_release_idx, :]
+good_release_y, bad_release_y = release_y[good_release_idx], release_y[bad_release_idx]
+# see predictions from releaser_q
+est_good_release_y = policy.releaser_q.predict(good_release_x)
+est_bad_release_y = policy.releaser_q.predict(bad_release_x)
+print(np.mean(est_bad_release_y < 0), np.mean(est_good_release_y > 0))
+
+
+idxes = np.argsort(trj_pool.final_rewards)[::-1]
+good_move_idx = move_y >= 0
+bad_move_idx = np.logical_not(good_move_idx)
+good_move_x, good_move_y = move_x[good_move_idx, :], move_y[good_move_idx]
+bad_move_x, bad_move_y = move_x[bad_move_idx, :], move_y[bad_move_idx]
+est_good_move_y = policy.mover_q.predict(good_move_x)
+est_bad_move_y = policy.mover_q.predict(bad_move_x)
+print(np.mean(est_bad_move_y < 0), np.mean(est_good_move_y > 0))
+
+pdb.set_trace()
 
 final_rewards = np.asarray(trj_pool.final_rewards)[trj_pool.good_idxes]
 avg_reward = np.mean(final_rewards)
