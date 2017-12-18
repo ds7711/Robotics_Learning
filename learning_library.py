@@ -7,65 +7,186 @@ import pdb
 import copy
 
 
-def shaping_training(env):
-
-    # initialize mover and releaser
+def shaping_training(ini_mover_str, ini_releaser_str, env):
 
     # initialize score criterion and reward threshold
-    reward_threshold = None
-    threshold_increase = 1.5
-    score_threhold = env.score_threshold
+    reward_threshold = env.ee2hoop - 0.5
+    strength_threshold_factor = 1.5
 
-    # initialize the exploiter, explorer, and joker
-    #   joker choose totally random actions and didn't care about rewards
-    #   exploiter uses the current best policy
-    #   explorer explore based on the current best policy
+    # initialize the policy object
+    ini_mover = get_move_agent(ini_mover_str)
+    ini_releaser = get_release_agent(ini_releaser_str)
+    policy = PolicyObject(ini_mover, ini_releaser, env, mover_q_ub=0)
 
     # test the performance of the exploiter
+    ini_ra = copy.deepcopy(env.ini_ra)
+    rewards, scores = policy.test_policy_performance(ini_ra, move_epislon=0.9,
+                                                     release_epislon=0.8,
+                                                     threshold=reward_threshold,
+                                                     num_test=1000)
+    avg_reward = np.mean(rewards)
+    avg_score = np.mean(scores)
+
+    # initial avg score
+    max_score = avg_score
+    avg_score_list = [avg_score]
+    reward_freq_list = [np.mean(rewards > 0)]
+    reward_thres_list = []
+    print("Initial rewards and scores are: %f, %f" % (avg_reward, avg_score))
 
     # initialize container for trajectories that actually scored!
+    score_trj_pool = TrajectoryPool(max_trajectories=100000, env=env)
 
     # loop until score performance reaches the threshold or pleateu or maximum iteration reached
-    while True:
+    for iii in range(10):
+
+        # training parameter
+        release_epislon = 0.75
+        move_epislon = 0.9
+        noise_level = 0.2
+        discounting_factor = 0.9
+        release_eps_factor = 4
+
+        score_list = []
 
         # delete the old training data and initialize the new container
+        trj_pool = TrajectoryPool(max_trajectories=1e10, env=env)
+        num_trjs = 3000
 
         # Repeatedly generate trajectories using explorer & exploiter
-        while True:
+
+        for _ in range(num_trjs):
             # generate trajectories using explorer, exploiter, and joker
+            # generate trj using random explorer
+            ra = copy.deepcopy(env.ini_ra)
+            states_list, mas_list, ras_list, rewards, \
+            score = policy.random_explorer(ra, np.random.randint(1, 100),
+                                           reward_threshold, noise=noise_level)
+            score_list.append(score)
+            trj_pool.add_trj(states_list, mas_list, ras_list, rewards)
+            if score:
+                score_trj_pool.add_trj(states_list, mas_list, ras_list, rewards)
 
-            # collect good, bad, and exploratory trajectories
-            # good: data that has the biggest reward
-            # bad: data that has least reward
-            # exploratory: data from random behavior
+            # repeat if it's the first time
+            if iii == 0:
+                for _ in range(2):
+                    ra = copy.deepcopy(env.ini_ra)
+                    states_list, mas_list, ras_list, rewards, \
+                        score = policy.random_explorer(ra, np.random.randint(1, 100),
+                                                       reward_threshold, noise=noise_level)
+                    score_list.append(score)
+                    trj_pool.add_trj(states_list, mas_list, ras_list, rewards)
+                    if score:
+                        score_trj_pool.add_trj(states_list, mas_list, ras_list, rewards)
 
-            pass
+            # generate trj using power exploring policy
+            if iii != 0:
+                ra = copy.deepcopy(env.ini_ra)
+                states_list, mas_list, ras_list, rewards, \
+                    score = policy.power_exploring_trajectory(ra, move_epislon=move_epislon,
+                                                              release_epislon=release_epislon,
+                                                              threshold=reward_threshold, noise=noise_level)
+                score_list.append(score)
+                trj_pool.add_trj(states_list, mas_list, ras_list, rewards)
+                if score:
+                    score_trj_pool.add_trj(states_list, mas_list, ras_list, rewards)
 
-        # Iteratively train the exploiter
-        while True:
-            # train the exploiter with the data in back-propagating way
-            #   1st: train with data of the last time step from all trajectories until converge
+                # generate try using greedy plus random
+                ra = copy.deepcopy(env.ini_ra)
+                states_list, mas_list, ras_list, rewards, \
+                    score = policy.greedy_plus_random_explorer(ra, move_epislon=move_epislon,
+                                                               release_epislon=release_epislon,
+                                                               threshold=reward_threshold, noise=noise_level)
+                score_list.append(score)
+                trj_pool.add_trj(states_list, mas_list, ras_list, rewards)
+                if score:
+                    score_trj_pool.add_trj(states_list, mas_list, ras_list, rewards)
 
-            #   2nd: update the q_value from the previous step and then train until converge
+                # generate trj using power plus random
+                ra = copy.deepcopy(env.ini_ra)
+                states_list, mas_list, ras_list, rewards, \
+                    score = policy.power_plus_random_explorer(ra, move_epislon=move_epislon,
+                                                              release_epislon=release_epislon,
+                                                              threshold=reward_threshold, noise=noise_level)
+                score_list.append(score)
+                trj_pool.add_trj(states_list, mas_list, ras_list, rewards)
+                if score:
+                    score_trj_pool.add_trj(states_list, mas_list, ras_list, rewards)
 
-            #   3rd: repeat until data from prevous time step doesn't have enough data
+            print("."),
 
-            #   4th: train with all the data until converge
+        # collect good, bad, and exploratory trajectories
+        # good: data that has the biggest reward
+        # bad: data that has least reward
+        # exploratory: data from random behavior
+        final_rewards = np.asarray(trj_pool.final_rewards)
+        reward_freq_list.append(np.mean(final_rewards > 0))
 
-            pass
+        release_x, release_y = trj_pool.data4release_agent()
+        move_x, move_y = trj_pool.data4move_agent(discounting=discounting_factor)
+
+        # train the releaser and mover
+        tmp_releaser = get_release_agent(ini_releaser_str)
+        tmp_mover = get_move_agent(ini_mover_str)
+        policy = PolicyObject(tmp_mover, tmp_releaser, env, mover_q_ub=0)
+        fitted_release_agent = training2converge(policy.releaser_q, release_x, release_y, batch_size=10000,
+                                                 epochs=100, verbose=0)
+        fitted_move_agent = training2converge(policy.mover_q, move_x, move_y, batch_size=10000, epochs=20, verbose=0)
+
+        # test the training results
+        # releaser
+
+        good_release_idx = release_y > 0
+        bad_release_idx = release_y < 0
+        good_releaser_y = release_y[good_release_idx]
+        bad_releaser_y = release_y[bad_release_idx]
+        est_release_y = policy.releaser_q.predict(release_x)
+        est_good_release_y = est_release_y[good_release_idx]
+        est_bad_release_y = est_release_y[bad_release_idx]
+        print(np.mean(est_good_release_y > 0), np.mean(est_bad_release_y < 0))
+
+        # mover
+        good_move_idx = move_y > 0
+        bad_move_idx = move_y < 0
+        good_mover_y = move_y[good_move_idx]
+        bad_mover_y = move_y[bad_move_idx]
+        est_move_y = policy.mover_q.predict(move_x)
+        est_good_move_y = est_move_y[good_move_idx]
+        est_bad_move_y = est_move_y[bad_move_idx]
+        print(np.mean(est_good_move_y > 0), np.mean(est_bad_move_y < 0))
+
+        pdb.set_trace()
+
+        # caculate the q_value criterion for releasing the ball
+        good_release_idx = release_y > 0
+        good_release_x = release_x[good_release_idx, :]
+        q_vals = np.squeeze(policy.releaser_q.predict(good_release_x))
+        q_val_threshold = (np.mean(q_vals) + release_eps_factor * np.max(q_vals)) / (1.0 + release_eps_factor)
+        release_epislon = q_val_threshold
 
         # test that exploiter could reliably do the current best behavior and record the data
+        ini_ra = copy.deepcopy(env.ini_ra)
+        rewards, scores = policy.test_policy_performance(ini_ra, move_epislon=move_epislon,
+                                                         release_epislon=release_epislon,
+                                                         threshold=reward_threshold)
+        avg_reward = np.mean(rewards > 0)
+        avg_score = np.mean(scores)
+        avg_score_list.append(avg_score)
+        print("Iteration: %d, reward threshold: %f, q_val_threshold: %f " % (iii, reward_threshold, q_val_threshold))
+        print("Current rewards and scores are: %f, %f" % (avg_reward, avg_score))
+        print(reward_freq_list)
 
-        # if not, continue exploring to collect more data
+        policy.mover_q.save("mover.h5")
+        policy.releaser_q.save("releaser.h5")
+
+        reward_thres_list.append(reward_threshold)
 
         # if yes, increase the reward threshold for next training iteration
-        reward_threshold /= threshold_increase
+        if reward_freq_list[-1] > reward_freq_list[-2]:
+            max_score = avg_score
+            reward_threshold /= strength_threshold_factor
 
-        pass
-
-    # return the exploiter that achieves desiered performance: q function, policy parameters
-
-    pass
+    return(np.asarray(avg_score_list), np.asarray(reward_freq_list), np.asarray(reward_thres_list))
 
 
 def get_move_agent(units_list, common_activation_func="tanh", regularization=regularizers.l2(0.1)):
@@ -186,6 +307,7 @@ class PolicyObject(object):
         for iii in range(len(release_action_list)):
             move_action = move_action_list[iii]
             release_action = release_action_list[iii]
+            # pdb.set_trace()
             ra.update(move_action, release_action)
             state_list.append(np.copy(ra.state))
             if ra.release:
@@ -196,18 +318,21 @@ class PolicyObject(object):
             else:
                 reward = 0
             reward_list.append(reward)
-        x = np.hstack((state_list[:-1], move_action_list))[:-1, :]
+        state_list = np.asarray(state_list[:-1])
+        x = np.hstack((state_list, move_action_list))[:-1, :]
         x = x[:, self.state_action_idxes]
-        q_vals = self.mover_q.predict(normalize_x(x))
-        return(np.asarray(state_list), np.squeeze(q_vals), np.asarray(reward_list), score)
+        move_q_vals = self.mover_q.predict(normalize_x(x))
+        _, release_q_vals = self._test_release_q(ra, state_list, threshold)
+        return(np.asarray(state_list), np.squeeze(move_q_vals), np.squeeze(release_q_vals),
+               np.asarray(reward_list), score)
 
-    def test_release_q(self, ra, final_state_list, threshold):
+    def _test_release_q(self, ra, final_state_list, threshold):
         reward_list = []
         final_state_list = np.asarray(final_state_list)
         final_state_list = normalize_x(final_state_list)
         for state in final_state_list:
-            ra.joint_angles = state[:self.state_dimension]
-            ra.angular_velocities = state[self.state_dimension:]
+            ra.joint_angles = state[:self.state_dimension/2]
+            ra.angular_velocities = state[self.state_dimension/2:]
             pos, vel = ra.loc_joints()[-1][:-1], ra.cal_ee_speed()[:-1]
             reward, dist2t = reward_function(pos, vel, threshold, self.hoop_position, self.gravity)
             reward_list.append(reward)
@@ -360,8 +485,9 @@ class PolicyObject(object):
             move_action, release_action = np.zeros(self.action_cmbs.shape[1]), 1
             ee_pos = ra.loc_joints()[-1][:-1]
             ee_speed = ra.cal_ee_speed()[:-1]
-            reward, score = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
-                                            self.gravity)
+            reward, dist2t = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
+                                             self.gravity)
+            score = dist2t < self.max_score_dist
             move_action_list.append(move_action)
             release_action_lsit.append(release_action)
             reward_list.append(reward)
@@ -408,7 +534,7 @@ class PolicyObject(object):
                 ee_pos = ra.loc_joints()[-1][:-1]
                 ee_speed = ra.cal_ee_speed()[:-1]
                 reward, dist2t = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
-                                         self.gravity)
+                                                 self.gravity)
                 score = dist2t < self.max_score_dist
                 move_action = np.zeros(self.action_cmbs.shape[1])
                 move_action_list.append(move_action)
@@ -422,8 +548,9 @@ class PolicyObject(object):
             move_action, release_action = np.zeros(self.action_cmbs.shape[1]), 1
             ee_pos = ra.loc_joints()[-1][:-1]
             ee_speed = ra.cal_ee_speed()[:-1]
-            reward, score = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
-                                            self.gravity)
+            reward, dist2t = reward_function(ee_pos, ee_speed, threshold, self.hoop_position,
+                                             self.gravity)
+            score = dist2t < self.max_score_dist
             move_action_list.append(move_action)
             release_action_lsit.append(release_action)
             reward_list.append(reward)
@@ -487,6 +614,17 @@ class PolicyObject(object):
                 np.asarray(release_action_list),
                 np.asarray(reward_list), score)
 
+    def test_policy_performance(self, ini_ra, move_epislon, release_epislon, threshold, num_test=1000):
+        score_list = []
+        reward_list = []
+        for iii in range(num_test):
+            ra = copy.deepcopy(ini_ra)
+            states, mas, ras, rewards, score = self.epsilon_greedy_trajectory(ra, move_epislon, release_epislon,
+                                                                              threshold)
+            score_list.append(score)
+            reward_list.append(rewards[-1])
+        return(np.asarray(reward_list), np.asarray(score_list))
+
 
 class TrajectoryPool(object):
     """
@@ -510,6 +648,11 @@ class TrajectoryPool(object):
         self.netral_idxes = []
         self.trj_sep_bd = [0, 0]
         self.final_state_list = []
+
+        # count the good data pairs and bad data pairs
+        self.num_good_xy = 0
+        self.num_bad_xy = 0
+        self.num_neutral_xy = 0
 
         self.state_idxes = env.state_idxes
         self.state_action_idxes = env.state_action_idxes
@@ -536,29 +679,42 @@ class TrajectoryPool(object):
 
             if rewards[-1] > self.trj_sep_bd[1]:
                 self.good_idxes.append(copy.copy(self.num_trajectories))
+                self.num_good_xy += len(states) - 1
             elif rewards[-1] < self.trj_sep_bd[0]:
                 self.bad_idxes.append(copy.copy(self.num_trajectories))
+                self.num_bad_xy += len(states) - 1
             else:
                 self.netral_idxes.append(copy.copy(self.num_trajectories))
+                self.num_neutral_xy += len(states) - 1
             self.num_trajectories += 1
 
         else:
             print("No capacity left!")
             pdb.set_trace()
 
-    def _good_bad_ratio(self):
+    def _good_bad_ratio(self, type="release"):
         """
         calculate the relative ratio of good and bad examples
         :return:
         """
-        num_bad = len(self.bad_idxes)
-        num_good = len(self.good_idxes)
-        if num_bad > num_good:
-            ratio = int(num_bad / num_good + 0.5)
-            return(ratio, 1)
-        else:
-            ratio = int(num_good / num_bad)
-            return(1, ratio)
+        if type == "release":
+            num_bad = len(self.bad_idxes)
+            num_good = len(self.good_idxes)
+            if num_bad > num_good:
+                ratio = int(num_bad / num_good + 0.5)
+                return(ratio, 1)
+            else:
+                ratio = int(num_good / num_bad)
+                return(1, ratio)
+        if type == "move":
+            num_bad = self.num_bad_xy
+            num_good = self.num_good_xy
+            if num_bad > num_good:
+                ratio = int(num_bad / num_good + 0.5)
+                return(ratio, 1)
+            else:
+                ratio = int(num_good / num_bad)
+                return(1, ratio)
 
     @staticmethod
     def _propogate_rewards(rewards, discounting):
@@ -592,7 +748,7 @@ class TrajectoryPool(object):
         neutral_X = neutral_X[:, self.state_idxes]
         neutral_Y = Y[self.netral_idxes]
 
-        num_good, num_bad = self._good_bad_ratio()
+        num_good, num_bad = self._good_bad_ratio(type="release")
         if num_good > 1:
             good_X = np.vstack([good_X for _ in range(num_good)])
             good_Y = np.concatenate([good_Y for _ in range(num_good)])
@@ -634,7 +790,7 @@ class TrajectoryPool(object):
         bad_X, bad_Y = self._combine_trj(self.bad_idxes, discounting)
         neutral_X, neutral_Y = self._combine_trj(self.netral_idxes, discounting)
 
-        num_good, num_bad = self._good_bad_ratio()
+        num_good, num_bad = self._good_bad_ratio(type="move")
         if num_good > 1:
             good_X = np.vstack([good_X for _ in range(num_good)])
             good_Y = np.concatenate([good_Y for _ in range(num_good)])
@@ -651,6 +807,12 @@ class TrajectoryPool(object):
 
 
 def normalize_x(old_x, time_step=1e-3):
+    """
+    normalize the x so that they are relatively on the same scale
+    :param old_x:
+    :param time_step:
+    :return:
+    """
     signs = np.sign(old_x)
     abs_x = np.abs(old_x) / time_step
     log_x = np.log(1.0 + abs_x)
@@ -659,6 +821,11 @@ def normalize_x(old_x, time_step=1e-3):
 
 
 def normolize_y(old_y):
+    """
+    rescale the y so that gradient descent can work, y values around 0 has strange gradient
+    :param old_y:
+    :return:
+    """
     avg = np.mean(np.abs(old_y))
     new_y = old_y / avg
     new_y = np.clip(new_y, -1.0, 1.0)
@@ -667,6 +834,17 @@ def normolize_y(old_y):
 
 
 def training2converge(agent, x, y, batch_size=10000, epochs=100, count_threshold=1, verbose=0):
+    """
+    training the agent until cross-validation accuracy doesn't decrease
+    :param agent:
+    :param x:
+    :param y:
+    :param batch_size:
+    :param epochs:
+    :param count_threshold:
+    :param verbose:
+    :return:
+    """
     training_flag = True
     minimum_val_lost = np.inf
     count = 0
@@ -675,7 +853,7 @@ def training2converge(agent, x, y, batch_size=10000, epochs=100, count_threshold
                             validation_split=0.3, verbose=verbose)
         val_loss = np.mean(ra_hist.history["val_loss"])
         print("%f......." % val_loss),
-        if val_loss < minimum_val_lost:
+        if minimum_val_lost - val_loss > 0.005:
             minimum_val_lost = val_loss
         else:
             count += 1

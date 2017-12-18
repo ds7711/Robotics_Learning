@@ -12,16 +12,20 @@ import numpy as np
 import kinematics_library as knl
 import environment
 import learning_library as lnl
+import pdb
 
-# import the environment
+# initialize objects
 env = environment.Env2D()
-ini_ra = env.ini_ra  # initial configuration of the robot
 
-# get the intial release and move agent
-# joint angles, angular velocities, q_value of release as output
-releaser_q = lnl.get_release_agent([4, 20, 5, 1])
-# joint angles, velcoties, and accelerations as input, q_value as output
-mover_q = lnl.get_move_agent([6, 50, 25, 1])  # use LQR planner? se
+release_agent_str = [4, 100, 50, 25, 1]
+move_agent_str = [6, 650, 250, 125, 1]
+
+avg_scores, reward_freqs, reward_thres_list = lnl.shaping_training(move_agent_str, release_agent_str, env)
+
+pdb.set_trace()
+
+print("hello123!")
+
 
 
 

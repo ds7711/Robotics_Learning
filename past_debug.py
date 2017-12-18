@@ -7,7 +7,63 @@ import copy
 import pdb
 
 
-# 7. debug for the TrajectoryPool
+# 7. test the training results
+
+env = environment.Env2D()
+ra = copy.deepcopy(env.ini_ra)
+release_agent = lnl.get_release_agent([4, 100, 50, 25, 1])
+move_agent = lnl.get_move_agent([6, 650, 250, 125, 1])
+policy = lnl.PolicyObject(move_agent, release_agent, env)
+
+# test the exploration method
+threshold = env.ee2hoop - 0.5
+trj_pool = lnl.TrajectoryPool(max_trajectories=100000, env=env)
+score_list = []
+
+print(env.action_combinations)
+for iii in range(10000):
+    ra = copy.deepcopy(env.ini_ra)
+    states_list, mas_list, ras_list, rewards_list, score = policy.random_explorer(ra, np.random.randint(1, 30), threshold, noise=0.0)
+    # if rewards_list[-1] > 0.8:
+    #     pdb.set_trace()
+    score_list.append(score)
+    trj_pool.add_trj(states_list, mas_list, ras_list, rewards_list)
+
+# get good & bad examples and see the predictions from fitted model
+release_x, release_y = trj_pool.data4release_agent()
+move_x, move_y = trj_pool.data4move_agent(0.9)
+
+# test predictions before training
+good_release_idx = release_y >= 0
+bad_release_idx = np.logical_not(good_release_idx)
+good_release_x, bad_release_x = release_x[good_release_idx, :], release_x[bad_release_idx, :]
+good_release_y, bad_release_y = release_y[good_release_idx], release_y[bad_release_idx]
+# see predictions from releaser_q
+est_good_release_y = policy.releaser_q.predict(good_release_x)
+est_bad_release_y = policy.releaser_q.predict(bad_release_x)
+print(np.mean(est_bad_release_y < 0), np.mean(est_good_release_y > 0))
+
+fitted_release_agent = lnl.training2converge(release_agent, release_x, release_y, batch_size=10000,
+                                             epochs=100, verbose=0)
+fitted_move_agent = lnl.training2converge(move_agent, move_x, move_y, batch_size=10000, epochs=20, verbose=0)
+
+good_release_idx = release_y >= 0
+bad_release_idx = np.logical_not(good_release_idx)
+good_release_x, bad_release_x = release_x[good_release_idx, :], release_x[bad_release_idx, :]
+good_release_y, bad_release_y = release_y[good_release_idx], release_y[bad_release_idx]
+# see predictions from releaser_q
+est_good_release_y = policy.releaser_q.predict(good_release_x)
+est_bad_release_y = policy.releaser_q.predict(bad_release_x)
+print(np.mean(est_bad_release_y < 0), np.mean(est_good_release_y > 0))
+
+
+good_move_idx = move_y >= 0
+bad_move_idx = np.logical_not(good_move_idx)
+good_move_x, good_move_y = move_x[good_move_idx, :], move_y[good_move_idx]
+bad_move_x, bad_move_y = move_x[bad_move_idx, :], move_y[bad_move_idx]
+est_good_move_y = policy.mover_q.predict(good_move_x)
+est_bad_move_y = policy.mover_q.predict(bad_move_x)
+print(np.mean(est_bad_move_y < 0), np.mean(est_good_move_y > 0))
 
 
 # 6. debug _propagate_rewards in TrajectoryPool
